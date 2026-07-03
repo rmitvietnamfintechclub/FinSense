@@ -1,0 +1,723 @@
+openapi: 3.0.3
+info:
+  title: FIN-SENSE API
+  description: >
+    Vietnamese financial news sentiment API.
+    Measures news-coverage tone only — not a buy/sell/hold signal.
+  version: "1.0.0"
+
+servers:
+  - url: https://finsense-api.onrender.com/api
+    description: Production (Render)
+  - url: http://localhost:8000/api
+    description: Local development
+
+security: []
+
+tags:
+  - name: dashboard
+    description: Public dashboard endpoints
+  - name: ticker
+    description: Ticker detail endpoints
+  - name: audit
+    description: Admin audit panel endpoints (JWT required)
+  - name: auth
+    description: Authentication
+
+paths:
+
+  # ─────────────────────────────────────────
+  # DASHBOARD
+  # ─────────────────────────────────────────
+
+  /dashboard/overview:
+    get:
+      tags: [dashboard]
+      summary: Dashboard metric cards + Fear & Greed gauge
+      description: >
+        Returns article count, event count, last updated timestamp,
+        and gauge data for the selected time window.
+        Tickers tracked is a frontend constant — not returned here.
+      parameters:
+        - $ref: '#/components/parameters/window'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardOverview'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /dashboard/feed:
+    get:
+      tags: [dashboard]
+      summary: Top tickers or top events feed
+      description: >
+        Returns top 5 items per page.
+        sort=ticker → ranked by event volume, includes S_final score.
+        sort=event → ranked by article volume, no sentiment score.
+        Use page param for load more.
+      parameters:
+        - $ref: '#/components/parameters/window'
+        - name: sort
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [ticker, event]
+          description: Feed mode — top tickers by event volume or top events by article volume
+        - $ref: '#/components/parameters/page'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardFeed'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  # ─────────────────────────────────────────
+  # TICKER DETAIL
+  # ─────────────────────────────────────────
+
+  /ticker/{symbol}:
+    get:
+      tags: [ticker]
+      summary: Ticker identity card + live sentiment gauge
+      description: >
+        Returns company info and live S_final score for the selected window.
+        Score is computed at request time from event_clusters — not from daily_sentiment_history.
+      parameters:
+        - $ref: '#/components/parameters/symbol'
+        - $ref: '#/components/parameters/window'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TickerDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /ticker/{symbol}/history:
+    get:
+      tags: [ticker]
+      summary: EOD sentiment + price history for dual-axis chart
+      description: >
+        Returns daily sentiment scores and closing prices from daily_sentiment_history.
+        Used for the 7d/30d/90d chart on the ticker detail page.
+      parameters:
+        - $ref: '#/components/parameters/symbol'
+        - name: days
+          in: query
+          required: false
+          schema:
+            type: integer
+            enum: [7, 30, 90]
+            default: 30
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TickerHistory'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /ticker/{symbol}/events:
+    get:
+      tags: [ticker]
+      summary: Recent events mentioning this ticker
+      description: >
+        Returns paginated list of events that mention the ticker
+        within the selected time window.
+      parameters:
+        - $ref: '#/components/parameters/symbol'
+        - $ref: '#/components/parameters/window'
+        - $ref: '#/components/parameters/page'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TickerEvents'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  # ─────────────────────────────────────────
+  # AUTH
+  # ─────────────────────────────────────────
+
+  /auth/login:
+    post:
+      tags: [auth]
+      summary: Admin login — returns JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [username, password]
+              properties:
+                username:
+                  type: string
+                password:
+                  type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  access_token:
+                    type: string
+                  token_type:
+                    type: string
+                    example: bearer
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  # ─────────────────────────────────────────
+  # AUDIT
+  # ─────────────────────────────────────────
+
+  /audit/events:
+    get:
+      tags: [audit]
+      summary: Audit event queue — unaudited first
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/page'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditQueue'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /audit/events/{cluster_id}/{source}:
+    patch:
+      tags: [audit]
+      summary: Approve or correct a source entry within an event
+      description: >
+        Approves or corrects the AI extraction for one source within a cluster.
+        On correct — updates scores directly on event_clusters source_breakdown,
+        flips is_audited to true, writes immutable record to audit_log.
+        On approve — flips is_audited to true, writes to audit_log with no score changes.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/cluster_id'
+        - name: source
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [CafeF, Vietstock]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditAction'
+      responses:
+        '200':
+          description: Audit action recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  cluster_id:
+                    type: string
+                  source:
+                    type: string
+                  action_type:
+                    type: string
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /audit/log:
+    get:
+      tags: [audit]
+      summary: Immutable audit history log
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/page'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditLog'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+# ─────────────────────────────────────────
+# COMPONENTS
+# ─────────────────────────────────────────
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    window:
+      name: window
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [24h, 48h, 72h]
+        default: 24h
+      description: Rolling time window for live sentiment computation
+
+    page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+      description: Page number for paginated results (5 items per page)
+
+    symbol:
+      name: symbol
+      in: path
+      required: true
+      schema:
+        type: string
+        example: HPG
+      description: Ticker symbol (uppercase)
+
+    cluster_id:
+      name: cluster_id
+      in: path
+      required: true
+      schema:
+        type: string
+        example: evt_hpg_q2_2026
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid JWT
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Action not permitted (e.g. attempt to write to frozen_test_set)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        detail:
+          type: string
+
+    SentimentScore:
+      type: number
+      format: float
+      minimum: -1.0
+      maximum: 1.0
+      nullable: true
+      description: Continuous sentiment score. null means no valid events in window.
+
+    # ── Dashboard ──
+
+    DashboardOverview:
+      type: object
+      properties:
+        window:
+          type: string
+          example: 24h
+        last_updated:
+          type: string
+          format: date-time
+        articles_count:
+          type: integer
+        events_count:
+          type: integer
+        gauge:
+          type: object
+          properties:
+            score:
+              $ref: '#/components/schemas/SentimentScore'
+            positive_count:
+              type: integer
+            neutral_count:
+              type: integer
+            negative_count:
+              type: integer
+
+    DashboardFeed:
+      type: object
+      properties:
+        sort:
+          type: string
+          enum: [ticker, event]
+        window:
+          type: string
+        page:
+          type: integer
+        has_more:
+          type: boolean
+        items:
+          type: array
+          items:
+            oneOf:
+              - $ref: '#/components/schemas/TickerFeedItem'
+              - $ref: '#/components/schemas/EventFeedItem'
+
+    TickerFeedItem:
+      type: object
+      properties:
+        rank:
+          type: integer
+        ticker:
+          type: string
+          example: HPG
+        company_name:
+          type: string
+          example: Hoa Phat Group
+        event_count:
+          type: integer
+        sentiment_score:
+          $ref: '#/components/schemas/SentimentScore'
+
+    EventFeedItem:
+      type: object
+      properties:
+        rank:
+          type: integer
+        cluster_id:
+          type: string
+        event_title:
+          type: string
+        article_count:
+          type: integer
+        sources:
+          type: object
+          properties:
+            CafeF:
+              type: integer
+            Vietstock:
+              type: integer
+        tickers:
+          type: array
+          items:
+            type: string
+
+    # ── Ticker Detail ──
+
+    TickerDetail:
+      type: object
+      properties:
+        ticker:
+          type: string
+        company_name:
+          type: string
+        window:
+          type: string
+        sentiment_score:
+          $ref: '#/components/schemas/SentimentScore'
+        gauge:
+          type: object
+          properties:
+            score:
+              $ref: '#/components/schemas/SentimentScore'
+            positive_count:
+              type: integer
+            neutral_count:
+              type: integer
+            negative_count:
+              type: integer
+        is_empty_state:
+          type: boolean
+          description: true if no valid events in window — UI shows neutral grey gauge
+
+    TickerHistory:
+      type: object
+      properties:
+        ticker:
+          type: string
+        days:
+          type: integer
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+                example: "2026-06-27"
+              sentiment_score:
+                $ref: '#/components/schemas/SentimentScore'
+              closing_price:
+                type: number
+                nullable: true
+
+    TickerEvents:
+      type: object
+      properties:
+        ticker:
+          type: string
+        window:
+          type: string
+        page:
+          type: integer
+        has_more:
+          type: boolean
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              cluster_id:
+                type: string
+              event_title:
+                type: string
+              created_at:
+                type: string
+                format: date-time
+              article_count:
+                type: integer
+              sources:
+                type: object
+                properties:
+                  CafeF:
+                    type: integer
+                  Vietstock:
+                    type: integer
+              sentiment_score:
+                $ref: '#/components/schemas/SentimentScore'
+
+    # ── Audit ──
+
+    AuditAction:
+      type: object
+      required: [action_type]
+      properties:
+        action_type:
+          type: string
+          enum: [approve, correct]
+        error_type:
+          type: string
+          nullable: true
+          description: Required when action_type is correct
+          enum:
+            - No error
+            - Wrong magnitude
+            - Wrong direction
+            - Wrong ticker
+            - Missed ticker
+        corrected_ticker_sentiments:
+          type: array
+          nullable: true
+          description: Only include tickers being corrected — not the full list
+          items:
+            type: object
+            properties:
+              ticker:
+                type: string
+              score:
+                $ref: '#/components/schemas/SentimentScore'
+        corrected_concept_sentiments:
+          type: array
+          nullable: true
+          description: Only include concepts being corrected — not the full list
+          items:
+            type: object
+            properties:
+              concept:
+                type: string
+              score:
+                $ref: '#/components/schemas/SentimentScore'
+
+    AuditQueue:
+      type: object
+      properties:
+        page:
+          type: integer
+        has_more:
+          type: boolean
+        total_pending:
+          type: integer
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              cluster_id:
+                type: string
+              event_title:
+                type: string
+              created_at:
+                type: string
+                format: date-time
+              source_breakdown:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    source:
+                      type: string
+                    is_audited:
+                      type: boolean
+                    ai_confidence:
+                      type: number
+                    ticker_sentiments:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          ticker:
+                            type: string
+                          score:
+                            $ref: '#/components/schemas/SentimentScore'
+                    concept_sentiments:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          concept:
+                            type: string
+                          score:
+                            $ref: '#/components/schemas/SentimentScore'
+
+    AuditLog:
+      type: object
+      properties:
+        page:
+          type: integer
+        has_more:
+          type: boolean
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              cluster_id:
+                type: string
+              source:
+                type: string
+              admin_id:
+                type: string
+              admin_name:
+                type: string
+              action_type:
+                type: string
+              error_type:
+                type: string
+                nullable: true
+              old_ticker_sentiments:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    ticker:
+                      type: string
+                    score:
+                      $ref: '#/components/schemas/SentimentScore'
+              new_ticker_sentiments:
+                type: array
+                nullable: true
+                items:
+                  type: object
+                  properties:
+                    ticker:
+                      type: string
+                    score:
+                      $ref: '#/components/schemas/SentimentScore'
+              old_concept_sentiments:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    concept:
+                      type: string
+                    score:
+                      $ref: '#/components/schemas/SentimentScore'
+              new_concept_sentiments:
+                type: array
+                nullable: true
+                items:
+                  type: object
+                  properties:
+                    concept:
+                      type: string
+                    score:
+                      $ref: '#/components/schemas/SentimentScore'
+              performed_at:
+                type: string
+                format: date-time
