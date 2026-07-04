@@ -10,9 +10,10 @@ from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import CollectionInvalid
 
 MONGO_URI = os.environ["MONGODB_URI"]
-DB_NAME = "finsense"
+DB_NAME = "FinSense"
 
-client = MongoClient(MONGO_URI)
+import certifi
+client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client[DB_NAME]
 
 
