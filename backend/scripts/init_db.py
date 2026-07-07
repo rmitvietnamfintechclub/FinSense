@@ -1,5 +1,5 @@
 """
-FIN-SENSE — MongoDB initialisation script
+FIN-SENSE 2.0 — MongoDB initialisation script
 Run once to create collections, indexes, and seed static_ontology + concept_dictionary.
 Usage: MONGODB_URI=... python backend/scripts/init_db.py
 """
@@ -9,10 +9,11 @@ from datetime import datetime, timezone
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import CollectionInvalid
 
+import certifi
+
 MONGO_URI = os.environ["MONGODB_URI"]
 DB_NAME = "FinSense"
 
-import certifi
 client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client[DB_NAME]
 
@@ -28,7 +29,6 @@ def create_collection(name: str):
 def setup_collections():
     print("Creating collections...")
     for name in [
-        "articles",
         "event_clusters",
         "daily_sentiment_history",
         "static_ontology",
@@ -42,18 +42,15 @@ def setup_collections():
 def setup_indexes():
     print("\nCreating indexes...")
 
-    # articles
-    db.articles.create_index("url", unique=True, name="url_unique")
-    db.articles.create_index([("ingested_at", DESCENDING)], name="ingested_at_desc")
-    print("  articles: done")
-
     # event_clusters
     db.event_clusters.create_index("cluster_id", unique=True, name="cluster_id_unique")
     db.event_clusters.create_index([("created_at", DESCENDING)], name="created_at_desc")
     db.event_clusters.create_index(
-        "source_breakdown.ai_response.ticker_sentiments.ticker", name="ticker"
+        "aggregated_analysis.ticker_sentiments.ticker", name="ticker_idx"
     )
-    db.event_clusters.create_index("is_needs_review", name="needs_review")
+    db.event_clusters.create_index(
+        "aggregated_analysis.concept_sentiments.concept", name="concept_idx"
+    )
     print("  event_clusters: done")
 
     # daily_sentiment_history
