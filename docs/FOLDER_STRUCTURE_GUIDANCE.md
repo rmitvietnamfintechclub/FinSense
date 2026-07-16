@@ -31,6 +31,7 @@ enums.py       Shared Python enums used across api and pipeline
 exception.py   Base exception classes
 formulas.py    S_final, recency decay, confidence weighting — shared scoring math
 logging.py     Shared log formatter and configuration
+schemas/       Shared Pydantic/document models, one file per model
 ```
 
 ### `backend/api/` — serving API

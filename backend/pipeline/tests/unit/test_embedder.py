@@ -3,7 +3,8 @@ from datetime import datetime
 
 import numpy as np
 
-from backend.pipeline.stages.cluster.embedder import Article, embed_articles
+from backend.core.schemas.article import Article
+from backend.pipeline.stages.cluster.embedder import _embedding_dim, embed_articles
 
 
 def _article(title: str, summary: str = "") -> Article:
@@ -19,7 +20,7 @@ def _article(title: str, summary: str = "") -> Article:
 def test_output_shape():
     articles = [_article(f"Headline {i}") for i in range(5)]
     result = embed_articles(articles)
-    assert result.shape == (5, 768)
+    assert result.shape == (5, _embedding_dim())
     assert result.dtype == np.float32
 
 
@@ -43,18 +44,21 @@ def test_order_preserved():
 
 def test_empty_input():
     result = embed_articles([])
-    assert result.shape == (0, 768)
+    assert result.shape == (0, _embedding_dim())
     assert result.dtype == np.float32
 
 
-def test_vietnamese_semantic_sanity():
-    """Catches a model that doesn't genuinely support Vietnamese.
+def test_blank_article():
+    articles = [_article("Headline"), _article("", ""), _article("Another headline")]
+    result = embed_articles(articles)
+    assert result.shape == (3, _embedding_dim())
+    assert result.dtype == np.float32
+    assert np.isfinite(result).all()
 
-    A model that just tokenizes Vietnamese without understanding it
-    still returns well-formed 768-dim vectors — no error anywhere. The
-    only thing that catches it is checking the *geometry*: paraphrases
-    of the same event must be closer than two unrelated headlines.
-    """
+
+def test_vietnamese_semantic_sanity():
+    # Catches a model that doesn't genuinely support Vietnamese.
+
     same_event_a = _article("VinFast khánh thành nhà máy sản xuất xe điện mới")
     same_event_b = _article("VinFast mở nhà máy xe điện")
     unrelated = _article("Vắng bóng doanh nghiệp FDI niêm yết: 'Mảnh ghép thiếu' của thị trường chứng khoán Việt")
