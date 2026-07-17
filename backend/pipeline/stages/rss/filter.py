@@ -1,69 +1,50 @@
+"""Stage 1 (rss) — dedup + relevance filtering of discovered candidates.
 
-
-#F2 (dedup) + F3 (relevance filter) — gộp chung theo thiết kế lead.
-
-
+Two independent filters:
+- F2 dedup: has this URL already been ingested? Compared by normalized
+  URL against the `articles` collection (which is unique-indexed on
+  `url`), so no separate hashed id is needed.
+- F3 relevance: drop obvious non-financial noise (birthdays, festivals,
+  promotions). The noise vocabulary lives in the lexicon so it can be
+  edited without touching code.
+"""
 from __future__ import annotations
 
 import json
+import logging
 import unicodedata
 from pathlib import Path
 
 from .url_normalizer import normalize_url
 
-_LEXICON_PATH = (
-    # rss/filter.py -> stages/rss/ -> stages/ -> pipeline/ -> pipeline/lexicon/
-    # (khớp đúng cấu trúc thật: lexicon/ nằm NGANG CẤP với stages/,
-    # không phải nằm trong stages/)
-    Path(__file__).resolve().parent.parent.parent / "lexicon" / "relevance_keywords.json"
+logger = logging.getLogger(__name__)
+
+
+# --- F2: dedup by normalized URL ------------------------------------------
+def is_duplicate(url: str, collection) -> bool:
+    """True if this URL (normalized) has already been ingested."""
+    return collection.find_one({"url": normalize_url(url)}) is not None
+
+
+# --- F3: relevance filter --------------------------------------------------
+_KEYWORDS_PATH = (
+    Path(__file__).resolve().parents[2] / "lexicon" / "relevance_keywords.json"
 )
-_noise_keywords_cache: list[str] | None = None
 
 
 def _load_noise_keywords() -> list[str]:
-    """Đọc NOISE_KEYWORDS từ lexicon/relevance_keywords.json, cache lại
-    sau lần đọc đầu tiên để không phải đọc file mỗi lần gọi is_relevant()."""
-    global _noise_keywords_cache
-    if _noise_keywords_cache is None:
-        with open(_LEXICON_PATH, encoding="utf-8") as f:
-            data = json.load(f)
-        _noise_keywords_cache = data["noise_keywords"]
-    return _noise_keywords_cache
+    data = json.loads(_KEYWORDS_PATH.read_text(encoding="utf-8"))
+    return data.get("noise_keywords", [])
 
 
-# ============================================================
-# F2 — Dedup
-# ============================================================
-
-
-def is_duplicate(url: str, collection) -> bool:
-    """
-    Kiểm tra URL (sau khi normalize) đã tồn tại trong collection chưa.
-    Dùng thẳng field `url` làm khóa dedup thay vì hash trung gian.
-
-    `collection` cần có method find_one(query) — tương thích cả
-    pymongo Collection thật lẫn FakeCollection dùng để test.
-    """
-    normalized = normalize_url(url)
-    return collection.find_one({"url": normalized}) is not None
-
-
-# ============================================================
-# F3 — Relevance filter
-# ============================================================
+NOISE_KEYWORDS = _load_noise_keywords()
 
 
 def _normalize_text(text: str) -> str:
-    """Chuẩn hóa Unicode NFC — tránh so khớp keyword fail âm thầm nếu
-    text tới từ nguồn encode theo NFD (dấu tổ hợp rời)."""
-    return unicodedata.normalize("NFC", text)
+    return unicodedata.normalize("NFC", text).lower()
 
 
 def is_relevant(title: str, summary: str) -> bool:
-    """
-    Trả False nếu title/summary chứa bất kỳ từ khóa nào trong
-    lexicon/relevance_keywords.json.
-    """
-    text = _normalize_text(f"{title} {summary}").lower()
-    keywords = _load_noise_keywords()
-    return not any(_normalize_text(kw) in text for kw in keywords)
+    """False if the article looks like non-financial noise."""
+    text = _normalize_text(f"{title} {summary}")
+    return not any(_normalize_text(kw) in text for kw in NOISE_KEYWORDS)
