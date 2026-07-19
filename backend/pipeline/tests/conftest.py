@@ -1,3 +1,4 @@
+"""Shared pytest setup for the pipeline test suite."""
 import sys
 from pathlib import Path
 

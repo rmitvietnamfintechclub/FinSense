@@ -1,25 +1,31 @@
-"""Shared configuration for the FinSense pipeline.
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
-Central home for tunables that more than one stage needs (HTTP settings,
-feed list). Kept import-light so any stage can pull from it without
-dragging in heavy dependencies.
-"""
-from __future__ import annotations
+class PipelineSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-# --- HTTP settings (scraper stage: article body fetch) ---------------------
-HTTP_TIMEOUT = 10  # seconds, per request
-HTTP_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-    )
-}
+    # Embedding Config
+    EMBEDDING_MODEL_NAME: str = "intfloat/multilingual-e5-base"
+    EMBEDDING_BATCH_SIZE: int = 32
+    E5_QUERY_PREFIX: str = "query: "
 
-# --- RSS discovery (rss stage) --------------------------------------------
-# Each pair is (source, feed_url). `source` must match an adapter's
-# SOURCE_NAME case-insensitively (see scraper/source_client.py) so the
-# scraper can later dispatch the right body extractor.
-RSS_FEEDS: list[tuple[str, str]] = [
+    # RSS Discovery Config
+    RSS_FEEDS: list[tuple[str, str]] = [
     ("CafeF", "https://cafef.vn/thi-truong-chung-khoan.rss"),
     ("VnExpress", "https://vnexpress.net/rss/kinh-doanh.rss"),
-]
+    ]   
+
+    # HTTP Settings
+    HTTP_TIMEOUT: int = 10  # seconds, per request
+    HTTP_HEADERS: dict[str, str] = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
+    }
+
+class APISettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+
+pipeline_settings = PipelineSettings()
+api_settings = APISettings()

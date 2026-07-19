@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 import feedparser
 import requests
 
-from backend.core.config import RSS_FEEDS, HTTP_HEADERS, HTTP_TIMEOUT
+from backend.core.config import pipeline_settings
 from backend.core.text_utils import strip_html
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ def fetch_feed(source: str, feed_url: str) -> list[dict]:
     feedparser reports malformed feeds via `bozo` rather than raising, so
     we log that but still salvage whatever entries parsed.
     """
-    resp = requests.get(feed_url, headers=HTTP_HEADERS, timeout=HTTP_TIMEOUT)
+    resp = requests.get(feed_url, headers=pipeline_settings.HTTP_HEADERS, timeout=pipeline_settings.HTTP_TIMEOUT)
     resp.raise_for_status()
     parsed = feedparser.parse(resp.content)
     
@@ -80,7 +80,7 @@ def fetch_all_feeds(feeds: list[tuple[str, str]] | None = None) -> list[dict]:
     A feed that raises (network error, unexpected feedparser state) is
     logged and skipped — it never stops the other feeds from running.
     """
-    feeds = feeds if feeds is not None else RSS_FEEDS
+    feeds = feeds if feeds is not None else pipeline_settings.RSS_FEEDS
     all_articles: list[dict] = []
 
     for source, feed_url in feeds:
