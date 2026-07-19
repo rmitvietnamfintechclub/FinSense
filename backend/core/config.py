@@ -20,6 +20,6 @@ HTTP_HEADERS = {
 # SOURCE_NAME case-insensitively (see scraper/source_client.py) so the
 # scraper can later dispatch the right body extractor.
 RSS_FEEDS: list[tuple[str, str]] = [
-    ("CafeF", "https://cafef.vn/trang-chu.rss"),
+    ("CafeF", "https://cafef.vn/thi-truong-chung-khoan.rss"),
     ("VnExpress", "https://vnexpress.net/rss/kinh-doanh.rss"),
 ]

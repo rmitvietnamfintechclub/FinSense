@@ -1,7 +1,7 @@
 import logging
 
 from .adapters import cafef, vnexpress
-from .html_stripper import strip_html
+from backend.core.text_utils import strip_html
 
 logger = logging.getLogger("scraper.source_client")
 

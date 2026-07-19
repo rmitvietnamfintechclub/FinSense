@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import backend.pipeline.stages.scraper.source_client as source_client
-from backend.pipeline.stages.scraper.html_stripper import strip_html
+from backend.core.text_utils import strip_html
 
 
 class TestHtmlStripper:

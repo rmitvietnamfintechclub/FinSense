@@ -33,8 +33,15 @@ _KEYWORDS_PATH = (
 
 
 def _load_noise_keywords() -> list[str]:
-    data = json.loads(_KEYWORDS_PATH.read_text(encoding="utf-8"))
-    return data.get("noise_keywords", [])
+    try:
+        data = json.loads(_KEYWORDS_PATH.read_text(encoding="utf-8"))
+        return data.get("noise_keywords", [])
+    except FileNotFoundError:
+        logger.warning(f"relevance_keywords.json not found at {_KEYWORDS_PATH}, noise filter disabled")
+        return []
+    except json.JSONDecodeError as e:
+        logger.warning(f"relevance_keywords.json is malformed: {e}")
+        return []
 
 
 NOISE_KEYWORDS = _load_noise_keywords()

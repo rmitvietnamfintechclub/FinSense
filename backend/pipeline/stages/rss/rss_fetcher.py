@@ -16,8 +16,10 @@ from calendar import timegm
 from datetime import datetime, timezone
 
 import feedparser
+import requests
 
-from backend.core.config import RSS_FEEDS
+from backend.core.config import RSS_FEEDS, HTTP_HEADERS, HTTP_TIMEOUT
+from backend.core.text_utils import strip_html
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ def _entry_to_article(entry, source: str) -> dict | None:
     return {
         "url": url,
         "title": (entry.get("title") or "").strip(),
-        "summary": (entry.get("summary") or "").strip(),
+        "summary": strip_html((entry.get("summary") or "").strip()),
         "source": source,
         "published_at": _to_datetime(
             entry.get("published_parsed") or entry.get("updated_parsed")
@@ -51,7 +53,12 @@ def fetch_feed(source: str, feed_url: str) -> list[dict]:
     feedparser reports malformed feeds via `bozo` rather than raising, so
     we log that but still salvage whatever entries parsed.
     """
-    parsed = feedparser.parse(feed_url)
+    resp = requests.get(feed_url, headers=HTTP_HEADERS, timeout=HTTP_TIMEOUT)
+    resp.raise_for_status()
+    parsed = feedparser.parse(resp.content)
+    
+    if parsed.bozo and not parsed.entries:
+        raise ValueError(f"feed parsed to zero entries: {parsed.bozo_exception}")
     if parsed.bozo:
         logger.warning(
             "rss feed parse issue (source=%s url=%s): %s",

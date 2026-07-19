@@ -74,6 +74,11 @@ def _parsed(entries, bozo=0, exc=None):
     return SimpleNamespace(bozo=bozo, bozo_exception=exc, entries=entries)
 
 
+def _fake_response(content: bytes = b""):
+    """A stand-in requests.Response that passes raise_for_status()."""
+    return SimpleNamespace(content=content, raise_for_status=lambda: None)
+
+
 class TestFetchFeed:
     def test_captures_all_required_fields(self, monkeypatch):
         entry = {
@@ -82,7 +87,8 @@ class TestFetchFeed:
             "summary": "Tóm tắt",
             "published_parsed": time.struct_time((2026, 7, 17, 3, 0, 0, 0, 0, 0)),
         }
-        monkeypatch.setattr(rss_fetcher.feedparser, "parse", lambda url: _parsed([entry]))
+        monkeypatch.setattr(rss_fetcher.requests, "get", lambda *a, **k: _fake_response())
+        monkeypatch.setattr(rss_fetcher.feedparser, "parse", lambda content: _parsed([entry]))
 
         [article] = rss_fetcher.fetch_feed("CafeF", "http://feed")
 
@@ -94,7 +100,8 @@ class TestFetchFeed:
 
     def test_entry_without_link_is_skipped(self, monkeypatch):
         entries = [{"title": "no link"}, {"link": "https://x.vn/ok"}]
-        monkeypatch.setattr(rss_fetcher.feedparser, "parse", lambda url: _parsed(entries))
+        monkeypatch.setattr(rss_fetcher.requests, "get", lambda *a, **k: _fake_response())
+        monkeypatch.setattr(rss_fetcher.feedparser, "parse", lambda content: _parsed(entries))
 
         result = rss_fetcher.fetch_feed("VnExpress", "http://feed")
 
@@ -102,7 +109,8 @@ class TestFetchFeed:
 
     def test_missing_timestamp_yields_none(self, monkeypatch):
         entry = {"link": "https://x.vn/a", "title": "t", "summary": "s"}
-        monkeypatch.setattr(rss_fetcher.feedparser, "parse", lambda url: _parsed([entry]))
+        monkeypatch.setattr(rss_fetcher.requests, "get", lambda *a, **k: _fake_response())
+        monkeypatch.setattr(rss_fetcher.feedparser, "parse", lambda content: _parsed([entry]))
 
         [article] = rss_fetcher.fetch_feed("CafeF", "http://feed")
 
@@ -113,12 +121,13 @@ class TestFetchAllFeeds:
     def test_one_bad_feed_does_not_abort_run(self, monkeypatch):
         good = {"link": "https://vnexpress.net/x.html", "title": "t", "summary": "s"}
 
-        def fake_parse(url):
+        def fake_get(url, *a, **k):
             if "bad" in url:
-                raise ValueError("boom")
-            return _parsed([good])
+                raise rss_fetcher.requests.ConnectionError("boom")
+            return _fake_response()
 
-        monkeypatch.setattr(rss_fetcher.feedparser, "parse", fake_parse)
+        monkeypatch.setattr(rss_fetcher.requests, "get", fake_get)
+        monkeypatch.setattr(rss_fetcher.feedparser, "parse", lambda content: _parsed([good]))
 
         feeds = [("CafeF", "http://bad-feed"), ("VnExpress", "http://good-feed")]
         result = rss_fetcher.fetch_all_feeds(feeds)
@@ -127,10 +136,11 @@ class TestFetchAllFeeds:
         assert [a["source"] for a in result] == ["VnExpress"]
 
     def test_aggregates_across_feeds(self, monkeypatch):
+        monkeypatch.setattr(rss_fetcher.requests, "get", lambda *a, **k: _fake_response())
         monkeypatch.setattr(
             rss_fetcher.feedparser,
             "parse",
-            lambda url: _parsed([{"link": f"{url}/a"}, {"link": f"{url}/b"}]),
+            lambda content: _parsed([{"link": "https://x.vn/a"}, {"link": "https://x.vn/b"}]),
         )
 
         feeds = [("CafeF", "http://f1"), ("VnExpress", "http://f2")]
