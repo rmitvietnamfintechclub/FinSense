@@ -25,3 +25,5 @@ Thumbs.db
 # Secrets — never commit these
 *.pem
 *.key
+
+/test.py
