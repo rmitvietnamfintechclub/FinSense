@@ -80,8 +80,8 @@ stages/
     html_stripper.py           Strips HTML tags from extracted body, returns plain text
   cluster/                     Stage 3 — Embedding and clustering
     embedder.py                Generates sentence embeddings
-    clustering.py              HDBSCAN clustering of embedded articles
-    centroid.py                Selects representative article per cluster
+    clustering.py              Incremental cosine clustering of embedded articles
+    centroid.py                Calculates and updates cluster centroids
   extract/                     Stage 4 — LLM sentiment extraction
     llm/
       adapters/gemini.py       Gemini adapter — swap here to change LLM provider
@@ -117,7 +117,7 @@ rss/filter          → drop duplicates and irrelevant articles
 html/source_client  → route URL to correct adapter
 html/adapters/      → fetch full HTML body, extract article content
 html/html_stripper  → strip remaining HTML tags, return plain text
-cluster/            → embed, cluster, select centroids
+cluster/            → embed, cluster, update centroids
 extract/            → send centroid text to Gemini, parse response
 aggregate/          → compute EOD scores, write to MongoDB
 ```

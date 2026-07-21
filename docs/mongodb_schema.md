@@ -55,7 +55,8 @@ Core collection. One document per event. Written by pipeline, read by serving AP
       "representative_article": {
         "url": "string",
         "published_at": "ISODate",
-        "content_fed_to_ai": "string — the full_content sent to Gemini"
+        "content_fed_to_ai": "string — the full_content sent to Gemini",
+        "centroid_similarity": "float [-1.0, 1.0] — cosine similarity to the cluster centroid at selection time; persisted because raw embeddings are discarded once folded into the centroid, so a later pipeline run can decide whether a new candidate should replace this representative"
       },
       "ai_response": {
         "ticker_sentiments": [
