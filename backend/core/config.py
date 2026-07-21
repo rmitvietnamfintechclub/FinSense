@@ -1,8 +1,13 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings as PydanticBaseSettings
+from pydantic_settings import SettingsConfigDict
 
-class PipelineSettings(BaseSettings):
+class BaseSettings(PydanticBaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
+    MONGODB_URI: str
+    MONGODB_DB_NAME: str = "FinSense"
+
+class PipelineSettings(BaseSettings):
     # Embedding Config
     EMBEDDING_MODEL_NAME: str = "intfloat/multilingual-e5-base"
     EMBEDDING_BATCH_SIZE: int = 32
@@ -24,7 +29,7 @@ class PipelineSettings(BaseSettings):
     }
 
 class APISettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    pass
 
 
 pipeline_settings = PipelineSettings()
