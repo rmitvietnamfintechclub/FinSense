@@ -29,6 +29,7 @@ def create_collection(name: str):
 def setup_collections():
     print("Creating collections...")
     for name in [
+        "articles",
         "event_clusters",
         "daily_sentiment_history",
         "static_ontology",
@@ -41,6 +42,11 @@ def setup_collections():
 
 def setup_indexes():
     print("\nCreating indexes...")
+
+    # articles
+    db.articles.create_index("url", unique=True, name="url_unique")
+    db.articles.create_index("cluster_id", name="cluster_id")
+    print("  articles: done")
 
     # event_clusters
     db.event_clusters.create_index("cluster_id", unique=True, name="cluster_id_unique")
