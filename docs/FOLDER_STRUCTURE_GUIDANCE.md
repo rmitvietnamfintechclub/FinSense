@@ -80,8 +80,8 @@ stages/
       vnexpress.py             VnExpress HTTP fetch + body extraction
   cluster/                     Stage 3 — Embedding and clustering
     embedder.py                Generates sentence embeddings
-    clustering.py              HDBSCAN clustering of embedded articles
-    centroid.py                Selects representative article per cluster
+    clustering.py              Incremental cosine clustering of embedded articles
+    centroid.py                Calculates and updates cluster centroids
   extract/                     Stage 4 — LLM sentiment extraction
     llm/
       client.py                LLM client wrapper
@@ -115,6 +115,7 @@ rss/filter          → drop duplicates and irrelevant articles
 scraper/source_client  → route URL to correct adapter
 scraper/adapters/      → fetch full HTML body, extract and strip article text
 cluster/            → embed, cluster, select centroids
+>>>>>>> dev
 extract/            → send centroid text to Gemini, parse response
 aggregate/          → compute EOD scores, write to MongoDB
 ```

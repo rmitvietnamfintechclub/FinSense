@@ -1,35 +1,21 @@
+"""Shared MongoDB connection — single client per process, used by both the API and the pipeline."""
 from __future__ import annotations
 
-import logging
+from functools import lru_cache
 
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
+import certifi
+from pymongo import MongoClient
+from pymongo.database import Database
 
-
-
-logger = logging.getLogger(__name__)
-
-_client: AsyncIOMotorClient | None = None
-_db: AsyncIOMotorDatabase | None = None
+from backend.core.config import database_settings
 
 
-async def init_db(mongodb_uri: str, db_name: str) -> None:
-    global _client, _db
-    _client = AsyncIOMotorClient(mongodb_uri)
-    await _client.admin.command("ping")
-    _db = _client[db_name]
-    logger.info("MongoDB client initialised (db=%s)", db_name)
+@lru_cache(maxsize=1)
+def get_client() -> MongoClient:
+    if not database_settings.MONGODB_URI:
+        raise RuntimeError("MONGODB_URI is not set")
+    return MongoClient(database_settings.MONGODB_URI, tlsCAFile=certifi.where())
 
 
-def get_db() -> AsyncIOMotorDatabase:
-    if _db is None:
-        raise RuntimeError("Database not initialised — call init_db() first")
-    return _db
-
-
-def close_db() -> None:
-    global _client, _db
-    if _client is not None:
-        _client.close()
-        _client = None
-        _db = None
-        logger.info("MongoDB client closed")
+def get_database() -> Database:
+    return get_client()[database_settings.MONGODB_DB_NAME]
