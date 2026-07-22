@@ -11,6 +11,7 @@
 
 | Collection | Writer | Reader | Purpose |
 |---|---|---|---|
+| `articles` | Ingestion Pipeline | Pipeline (dedup), Audit | Persisted article metadata for URL dedup and audit trail |
 | `event_clusters` | Scheduled Pipeline | Serving API, Audit Panel | Clustered events + AI extraction results |
 | `daily_sentiment_history` | Nightly Batch Job | Serving API | Pre-computed EOD scores for historical chart |
 | `static_ontology` | Manual seed / Admin | Serving API | Concept → sector weight + alias map |
@@ -19,7 +20,29 @@
 
 ---
 
-## 1. `event_clusters`
+## 1. `articles`
+
+Persisted article metadata. Written by ingestion pipeline. Purpose: URL deduplication and audit trail. Full content is **not** stored — pipeline uses it transiently in memory only.
+
+```json
+{
+  "_id": "ObjectId (auto)",
+  "article_id": "string — e.g. 'cafef_5d8a9f2'",
+  "url": "string — canonical URL, unique",
+  "source": "string — e.g. 'CafeF'",
+  "published_at": "ISODate",
+  "ingested_at": "ISODate",
+  "cluster_id": "string | null — populated after clustering step"
+}
+```
+
+**Indexes:**
+- `url` → unique (primary dedup guard)
+- `cluster_id` → for reverse-lookup from cluster → contributing articles
+
+---
+
+## 2. `event_clusters`
 
 Core collection. One document per event. Written by pipeline, read by serving API and audit panel.
 
@@ -81,7 +104,7 @@ Core collection. One document per event. Written by pipeline, read by serving AP
 
 ---
 
-## 2. `daily_sentiment_history`
+## 3. `daily_sentiment_history`
 
 Pre-computed EOD scores. Written by nightly batch job. Zero computation at serve time.
 
@@ -103,7 +126,7 @@ Pre-computed EOD scores. Written by nightly batch job. Zero computation at serve
 
 ---
 
-## 3. `static_ontology`
+## 4. `static_ontology`
 
 Sector/concept weight map. Manually seeded. Read by serving API for S_final calculation.  
 **Mandatory human review + sign-off required before first production deployment.**
@@ -120,7 +143,7 @@ Sector/concept weight map. Manually seeded. Read by serving API for S_final calc
 }
 ```
 
-## 4. `concept_dictionary`
+## 5. `concept_dictionary`
 ```json
 {
   "concept": "REAL_ESTATE",
@@ -132,7 +155,7 @@ Sector/concept weight map. Manually seeded. Read by serving API for S_final calc
 - `aliases` → multikey index (alias lookup at serving time)
 
 ---
-## 5. `audit_log`
+## 6. `audit_log`
 
 Immutable. No application code path may delete or modify entries (US-G4).
 
@@ -160,7 +183,7 @@ Immutable. No application code path may delete or modify entries (US-G4).
 
 ---
 
-## 6. `frozen_test_set`
+## 7. `frozen_test_set`
 
 Hand-labeled benchmark. Locked at W1. Read-only forever. Pipeline and audit endpoints must never write to this collection. A 403 guard must be enforced at the API level (US-G8).
 
@@ -220,6 +243,7 @@ Run this init script after connecting (see `backend/scripts/init_db.py` below):
 ```
 Database: finsense
 Collections to create:
+  - articles
   - event_clusters
   - daily_sentiment_history
   - static_ontology

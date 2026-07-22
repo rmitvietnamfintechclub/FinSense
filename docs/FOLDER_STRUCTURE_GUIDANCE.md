@@ -31,7 +31,9 @@ enums.py       Shared Python enums used across api and pipeline
 exception.py   Base exception classes
 formulas.py    S_final, recency decay, confidence weighting — shared scoring math
 logging.py     Shared log formatter and configuration
+text_utils.py  Shared text helpers
 schemas/       Shared Pydantic/document models, one file per model
+  article.py
 ```
 
 ### `backend/api/` — serving API
@@ -62,7 +64,7 @@ tests/
 
 Runs on a cron via GitHub Actions. Writes to MongoDB. Never calls the API.
 
-Pipeline execution order: **rss → html → cluster → extract → aggregate**
+Pipeline execution order: **rss → cluster → scraper → extract → aggregate**
 
 ```
 main.py                        Pipeline entrypoint, stage orchestration
@@ -70,28 +72,25 @@ stages/
   rss/                         Stage 1 — RSS ingestion
     rss_fetcher.py             Fetches and parses RSS feeds from all sources
     url_normalizer.py          Normalizes URLs before dedup check
-    source_tagger.py           Tags each article with its source name
     filter.py                  Dedup against MongoDB + relevance filter on title/summary
-  scraper/                        Stage 2 — Full body scraping (runs on URLs selected by rss stage)
+  scraper/                     Stage 2 — Full body scraping (runs on URLs selected by rss stage)
     source_client.py           Routes to the correct scraper adapter
     adapters/
       cafef.py                 CafeF HTTP fetch + body extraction
       vnexpress.py             VnExpress HTTP fetch + body extraction
-    html_stripper.py           Strips HTML tags from extracted body, returns plain text
   cluster/                     Stage 3 — Embedding and clustering
     embedder.py                Generates sentence embeddings
     clustering.py              Incremental cosine clustering of embedded articles
     centroid.py                Calculates and updates cluster centroids
   extract/                     Stage 4 — LLM sentiment extraction
     llm/
-      adapters/gemini.py       Gemini adapter — swap here to change LLM provider
+      client.py                LLM client wrapper
       prompts/                 Versioned prompt files — never edit existing files
         v1.txt
         v2.txt
         v3.txt
-      client.py                LLM client wrapper
-    prompt_builder.py          Loads active prompt version from config
     output_schema.py           Pydantic schema for LLM response
+    prompt_builder.py          Loads active prompt version from config
     response_parser.py         Parses and validates LLM output
     unmapped_handler.py        Logs unknown concepts to MongoDB for admin review
   aggregate/                   Stage 5 — EOD batch scoring and event aggregation
@@ -99,8 +98,8 @@ stages/
     event_aggregator.py
 lexicon/                       JSON config files — read by pipeline at runtime
   vietnam_financial_lexicon.json   Sentiment terms, abbreviations, aliases
-  concept_list.json                Known concept taxonomy
-  ticker_coverage_list.json        Tickers the system tracks
+  concept_dictionary.json          Known concept taxonomy
+  static_ontology.json             Ticker → concept weight map
   relevance_keywords.json          Keywords used by relevance filter in rss/filter.py
 tests/
   unit/                        Unit tests per stage
@@ -111,18 +110,17 @@ tests/
 ```
 rss/rss_fetcher     → fetch RSS feeds from all sources
 rss/url_normalizer  → normalize URLs
-rss/source_tagger   → tag each article with source name
 rss/filter          → drop duplicates and irrelevant articles
-                    → selected URLs passed to html stage
-html/source_client  → route URL to correct adapter
-html/adapters/      → fetch full HTML body, extract article content
-html/html_stripper  → strip remaining HTML tags, return plain text
-cluster/            → embed, cluster, update centroids
+                    → selected URLs passed to scraper stage
+scraper/source_client  → route URL to correct adapter
+scraper/adapters/      → fetch full HTML body, extract and strip article text
+cluster/            → embed, cluster, select centroids
+>>>>>>> dev
 extract/            → send centroid text to Gemini, parse response
 aggregate/          → compute EOD scores, write to MongoDB
 ```
 
-**Adding a new news source:** add an adapter in `stages/html/adapters/`, register it in `stages/html/source_client.py`. No other files need to change.
+**Adding a new news source:** add an adapter in `stages/scraper/adapters/`, register it in `stages/scraper/source_client.py`. No other files need to change.
 
 **Changing the prompt:** add a new versioned file in `stages/extract/llm/prompts/`, update the active version in config. Never edit existing version files — they are the historical record.
 
@@ -171,19 +169,18 @@ frontend/
 ```
 evaluation/
   frozen_test_set/     Hand-labeled benchmark — NEVER modify, NEVER write to this
+    articles/          Raw article files
   runner.py            Runs extraction against the frozen test set
   metrics.py           Computes bucket agreement rate against ground truth
   results/             JSON results per evolution — append only, never overwrite
     evolution_1_baseline.json
     evolution_2_domain.json
     evolution_3_prompting.json
-  requirements.txt     Separate install — run independently from backend
 ```
 
 **Hard rules:**
 - `frozen_test_set/` is read-only forever. No exceptions.
 - `results/` files are append-only. Add a new file for each new evaluation run — never overwrite existing ones.
-- Run `scripts/run_evaluation.py` to execute an eval. Never run the runner directly against production data.
 
 ---
 
@@ -243,7 +240,7 @@ All checks run on every PR to `main`. You cannot merge without passing CI. Do no
 | Task | Location |
 |---|---|
 | Add a new API endpoint | `backend/api/features/<new_feature>/` |
-| Add a new news source | `backend/pipeline/stages/html/adapters/` + register in `html/source_client.py` |
+| Add a new news source | `backend/pipeline/stages/scraper/adapters/` + register in `scraper/source_client.py` |
 | Change the LLM prompt | `backend/pipeline/stages/extract/llm/prompts/` — new versioned file only |
 | Change scoring formula | `backend/core/formulas.py` — coordinate with both teams |
 | Add a shared Python enum | `backend/core/enums.py` |
