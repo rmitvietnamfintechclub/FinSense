@@ -41,7 +41,7 @@ def test_select_source_representatives_picks_closest_per_source():
     articles = [
         _article("A1", "http://a/1", "CafeF"),
         _article("A2", "http://a/2", "CafeF"),
-        _article("B1", "http://b/1", "Vietstock"),
+        _article("B1", "http://b/1", "VnExpress"),
     ]
     embeddings = np.array(
         [[1.0, 0.0], [0.9, 0.1], [0.85, 0.15]],
@@ -53,8 +53,9 @@ def test_select_source_representatives_picks_closest_per_source():
     result = select_source_representatives(articles, embeddings, cluster)
 
     assert result["CafeF"].url == "http://a/2"
-    assert result["Vietstock"].url == "http://b/1"
+    assert result["VnExpress"].url == "http://b/1"
     assert result["CafeF"].centroid_similarity == pytest.approx(1.0, abs=1e-5)
+    assert result["CafeF"].content_fed_to_ai is None 
 
 
 def test_select_source_representatives_keeps_closer_existing():
@@ -96,12 +97,13 @@ def test_select_source_representatives_replaces_when_closer():
 
     assert result["CafeF"].url == "http://a/new"
     assert result["CafeF"].centroid_similarity == pytest.approx(1.0)
+    assert result["CafeF"].content_fed_to_ai is None   # swapped-in rep not yet scraped
 
 
 def test_merge_event_coverage_retains_full_member_list_and_urls():
     articles = [
         _article("A1", "http://a/1", "CafeF"),
-        _article("B1", "http://b/1", "Vietstock"),
+        _article("B1", "http://b/1", "VnExpress"),
     ]
     cluster = Cluster("evt_1", np.array([1.0, 0.0]), article_count=2, article_indices=[0, 1])
     existing = EventCoverage(total_articles=1, all_urls={"CafeF": ["http://a/0"]})
@@ -109,7 +111,7 @@ def test_merge_event_coverage_retains_full_member_list_and_urls():
     coverage = merge_event_coverage(articles, cluster, existing)
 
     assert coverage.all_urls["CafeF"] == ["http://a/0", "http://a/1"]
-    assert coverage.all_urls["Vietstock"] == ["http://b/1"]
+    assert coverage.all_urls["VnExpress"] == ["http://b/1"]
     assert coverage.total_articles == 3
 
 
@@ -128,7 +130,7 @@ def test_build_event_cluster_from_scratch():
     articles = [
         _article("HPG steel news", "http://a/1", "CafeF"),
         _article("HPG steel update", "http://a/2", "CafeF"),
-        _article("HPG profit", "http://b/1", "Vietstock"),
+        _article("HPG profit", "http://b/1", "VnExpress"),
     ]
     embeddings = np.array([[1.0, 0.0], [0.9, 0.1], [0.85, 0.15]], dtype=np.float32)
     centroid = np.array([0.9, 0.1], dtype=np.float32)
@@ -140,10 +142,11 @@ def test_build_event_cluster_from_scratch():
     assert result.event_title == "HPG steel update"  # exactly on centroid, closest overall
     assert result.centroid_embedding == pytest.approx(centroid.tolist())
     assert result.event_coverage.total_articles == 3
-    assert set(result.event_coverage.all_urls.keys()) == {"CafeF", "Vietstock"}
+    assert set(result.event_coverage.all_urls.keys()) == {"CafeF", "VnExpress"}
     assert len(result.source_breakdown) == 2
     assert all(b.ai_response is None and b.is_audited is False for b in result.source_breakdown)
     assert result.created_at == result.updated_at
+    assert all(b.representative_article.content_fed_to_ai is None for b in result.source_breakdown)
 
 
 def test_build_event_cluster_merges_with_existing():
@@ -152,7 +155,7 @@ def test_build_event_cluster_merges_with_existing():
     first_cluster = Cluster("evt_hpg", np.array([1.0, 0.0]), article_count=1, article_indices=[0])
     existing = build_event_cluster(first_articles, first_embeddings, first_cluster)
 
-    second_articles = [_article("HPG profit", "http://b/1", "Vietstock")]
+    second_articles = [_article("HPG profit", "http://b/1", "VnExpress")]
     second_embeddings = np.array([[0.95, 0.05]], dtype=np.float32)
     second_cluster = Cluster("evt_hpg", np.array([0.95, 0.05]), article_count=2, article_indices=[0])
 
@@ -161,7 +164,7 @@ def test_build_event_cluster_merges_with_existing():
     assert updated.created_at == existing.created_at
     assert updated.event_title == existing.event_title
     assert updated.event_coverage.total_articles == 2
-    assert set(updated.event_coverage.all_urls.keys()) == {"CafeF", "Vietstock"}
+    assert set(updated.event_coverage.all_urls.keys()) == {"CafeF", "VnExpress"}
     assert len(updated.source_breakdown) == 2
     assert updated.centroid_embedding == pytest.approx([0.95, 0.05])
 
@@ -196,7 +199,7 @@ def test_upsert_event_cluster_round_trip_grows_coverage():
     first_cluster = Cluster("evt_hpg", np.array([1.0, 0.0]), article_count=1, article_indices=[0])
     upsert_event_cluster(first_articles, first_embeddings, first_cluster, collection=collection)
 
-    second_articles = [_article("HPG profit", "http://b/1", "Vietstock")]
+    second_articles = [_article("HPG profit", "http://b/1", "VnExpress")]
     second_embeddings = np.array([[0.95, 0.05]], dtype=np.float32)
     second_cluster = Cluster("evt_hpg", np.array([0.95, 0.05]), article_count=2, article_indices=[0])
     result = upsert_event_cluster(second_articles, second_embeddings, second_cluster, collection=collection)
@@ -204,7 +207,7 @@ def test_upsert_event_cluster_round_trip_grows_coverage():
     assert result.event_coverage.total_articles == 2
     assert collection.count_documents({"cluster_id": "evt_hpg"}) == 1
     stored = collection.find_one({"cluster_id": "evt_hpg"})
-    assert set(stored["event_coverage"]["all_urls"].keys()) == {"CafeF", "Vietstock"}
+    assert set(stored["event_coverage"]["all_urls"].keys()) == {"CafeF", "VnExpress"}
 
 
 def test_load_existing_clusters_filters_by_lookback():
@@ -235,10 +238,10 @@ def test_load_existing_clusters_filters_by_lookback():
 def test_backfill_article_cluster_ids_matches_by_url():
     collection = mongomock.MongoClient().finsense.articles
     collection.insert_one({"url": "http://a/1", "source": "CafeF", "cluster_id": None})
-    collection.insert_one({"url": "http://b/1", "source": "Vietstock", "cluster_id": None})
+    collection.insert_one({"url": "http://b/1", "source": "VnExpress", "cluster_id": None})
     articles = [
         _article("A1", "http://a/1", "CafeF"),
-        _article("B1", "http://b/1", "Vietstock"),
+        _article("B1", "http://b/1", "VnExpress"),
     ]
 
     backfill_article_cluster_ids(articles, ["evt_1", "evt_2"], collection=collection)
@@ -321,7 +324,7 @@ def test_run_cluster_stage_empty_input_is_noop():
 def test_run_cluster_stage_rejects_duplicate_urls():
     articles = [
         _article("A1", "http://a/1", "CafeF"),
-        _article("A1 again", "http://a/1", "Vietstock"),
+        _article("A1 again", "http://a/1", "VnExpress"),
     ]
 
     with pytest.raises(ValueError, match="duplicate"):

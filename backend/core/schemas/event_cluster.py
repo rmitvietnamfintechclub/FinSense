@@ -26,7 +26,7 @@ class AIResponse(BaseModel):
 class RepresentativeArticle(BaseModel):
     url: str
     published_at: datetime
-    content_fed_to_ai: str
+    content_fed_to_ai: str | None = None
     # Cosine similarity to the cluster centroid at selection time. Raw embeddings
     # are not retained once folded into the centroid, so this is persisted to let
     # a later pipeline run decide whether a new candidate should replace it.

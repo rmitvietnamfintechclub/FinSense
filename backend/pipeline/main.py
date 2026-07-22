@@ -1,6 +1,6 @@
 """Pipeline entrypoint.
 
-Intended stage order is rss -> scraper -> cluster -> extract -> aggregate
+Intended stage order is rss -> cluster -> scraper -> extract -> aggregate
 (see docs/FOLDER_STRUCTURE_GUIDANCE.md), but only the cluster stage is
 implemented so far. `main()` takes already-scraped articles as input rather
 than fetching them itself, since rss/scraper don't exist yet; wire those in

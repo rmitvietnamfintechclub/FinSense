@@ -54,7 +54,7 @@ def select_source_representatives(
         best[article.source] = RepresentativeArticle(
             url=article.url,
             published_at=article.published_at,
-            content_fed_to_ai=article.full_content or "",
+            content_fed_to_ai= None,
             centroid_similarity=similarity,
         )
     return best

@@ -36,7 +36,7 @@ Core collection. One document per event. Written by pipeline, read by serving AP
     "total_articles": "number",
     "all_urls": {
       "CafeF": ["string (url)", "..."],
-      "Vietstock": ["string (url)", "..."]
+      "VnExpress": ["string (url)", "..."]
     }
   },
 

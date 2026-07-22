@@ -238,7 +238,7 @@ paths:
           required: true
           schema:
             type: string
-            enum: [CafeF, Vietstock]
+            enum: [CafeF, VnExpress]
       requestBody:
         required: true
         content:
@@ -470,7 +470,7 @@ components:
           properties:
             CafeF:
               type: integer
-            Vietstock:
+            VnExpress:
               type: integer
         tickers:
           type: array
@@ -557,7 +557,7 @@ components:
                 properties:
                   CafeF:
                     type: integer
-                  Vietstock:
+                  VnExpress:
                     type: integer
               sentiment_score:
                 $ref: '#/components/schemas/SentimentScore'
