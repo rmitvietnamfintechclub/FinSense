@@ -1,4 +1,5 @@
 """Unit tests for incremental cosine-similarity clustering."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -125,7 +126,9 @@ def test_empty_batch_preserves_existing_cluster_without_mutating_it():
     assert result.assignments == ()
     assert result.clusters[0].article_count == 3
     assert result.clusters[0].centroid_embedding is not original_centroid
-    np.testing.assert_array_equal(result.clusters[0].centroid_embedding, original_centroid)
+    np.testing.assert_array_equal(
+        result.clusters[0].centroid_embedding, original_centroid
+    )
 
 
 def test_plain_empty_list_returns_empty_result():

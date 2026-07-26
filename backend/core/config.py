@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+
 class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -7,7 +8,8 @@ class DatabaseSettings(BaseSettings):
     # so modules that merely import config.py don't require a configured DB.
     MONGODB_URI: str = ""
     MONGODB_DB_NAME: str = "FinSense"
-    
+
+
 class PipelineSettings(BaseSettings):
     # Embedding Config
     EMBEDDING_MODEL_NAME: str = "intfloat/multilingual-e5-base"
@@ -20,9 +22,9 @@ class PipelineSettings(BaseSettings):
 
     # RSS Discovery Config
     RSS_FEEDS: list[tuple[str, str]] = [
-    ("CafeF", "https://cafef.vn/thi-truong-chung-khoan.rss"),
-    ("VnExpress", "https://vnexpress.net/rss/kinh-doanh.rss"),
-    ]   
+        ("CafeF", "https://cafef.vn/thi-truong-chung-khoan.rss"),
+        ("VnExpress", "https://vnexpress.net/rss/kinh-doanh.rss"),
+    ]
 
     # HTTP Settings
     HTTP_TIMEOUT: int = 10  # seconds, per request
@@ -32,6 +34,7 @@ class PipelineSettings(BaseSettings):
             "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
         )
     }
+
 
 class APISettings(BaseSettings):
     pass

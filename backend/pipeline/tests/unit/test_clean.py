@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import backend.pipeline.stages.scraper.source_client as source_client
 from backend.core.text_utils import strip_html
+from backend.pipeline.stages.scraper import source_client
 
 
 class TestHtmlStripper:
@@ -16,7 +16,9 @@ class TestHtmlStripper:
 class TestSourceClient:
     def test_lookup_is_case_and_whitespace_insensitive(self, monkeypatch):
         monkeypatch.setitem(
-            source_client._ADAPTERS, "cafef", lambda url: "<div>Hello <b>World</b></div>"
+            source_client._ADAPTERS,
+            "cafef",
+            lambda url: "<div>Hello <b>World</b></div>",
         )
         assert source_client.fetch_body("  CafeF ", "http://x") == "Hello World"
 

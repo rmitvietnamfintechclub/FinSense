@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 
 from backend.core.config import pipeline_settings
 
-logger = logging.getLogger("scraper.adapters.cafef")
+logger = logging.getLogger(__name__)
 
 SOURCE_NAME = "CafeF"
 
@@ -16,7 +16,9 @@ JUNK_SELECTORS = ".ads, .box-related, .banner-ads, script, style"
 def fetch_body(url: str, timeout: int = pipeline_settings.HTTP_TIMEOUT) -> str | None:
     """Return the CafeF article body HTML fragment (junk removed), or None."""
     try:
-        resp = requests.get(url, headers=pipeline_settings.HTTP_HEADERS, timeout=timeout)
+        resp = requests.get(
+            url, headers=pipeline_settings.HTTP_HEADERS, timeout=timeout
+        )
         resp.raise_for_status()
     except requests.exceptions.Timeout:
         logger.warning("Timeout (%ss) while fetching: %s", timeout, url)

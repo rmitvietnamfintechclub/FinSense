@@ -1,4 +1,5 @@
 """Centroid calculations for article clusters."""
+
 from __future__ import annotations
 
 from numbers import Integral
@@ -53,7 +54,9 @@ def update_centroid(
     centroid = _vector(centroid_embedding, name="centroid_embedding")
     embedding = _vector(new_embedding, name="new_embedding")
     if centroid.shape != embedding.shape:
-        raise ValueError("centroid_embedding and new_embedding must have the same shape")
+        raise ValueError(
+            "centroid_embedding and new_embedding must have the same shape"
+        )
 
     dtype = np.result_type(centroid.dtype, embedding.dtype)
     centroid = centroid.astype(dtype, copy=False)

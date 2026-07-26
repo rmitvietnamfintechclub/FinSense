@@ -5,8 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import backend.pipeline.stages.rss.rss_fetcher as rss_fetcher
-from backend.pipeline.stages.rss import filter as rss_filter
+from backend.pipeline.stages.rss import filter, rss_fetcher
 from backend.pipeline.stages.rss.url_normalizer import normalize_url
 
 
@@ -51,25 +50,28 @@ class FakeCollection:
 class TestIsDuplicate:
     def test_true_when_normalized_url_already_present(self):
         collection = FakeCollection({"https://cafef.vn/a"})
-        assert rss_filter.is_duplicate("HTTP://CafeF.vn/a/?utm_source=x", collection)
+        assert filter.is_duplicate("HTTP://CafeF.vn/a/?utm_source=x", collection)
 
     def test_false_when_not_present(self):
-        assert rss_filter.is_duplicate("https://cafef.vn/b", FakeCollection()) is False
+        assert filter.is_duplicate("https://cafef.vn/b", FakeCollection()) is False
 
 
 # --- filter: relevance -----------------------------------------------------
 class TestIsRelevant:
     def test_drops_noise_keyword_article(self):
-        assert rss_filter.is_relevant("Lễ hội khai trương chi nhánh", "") is False
+        assert filter.is_relevant("Lễ hội khai trương chi nhánh", "") is False
 
     def test_keeps_financial_article(self):
-        assert rss_filter.is_relevant("HPG báo lãi quý 2", "Giá thép tăng") is True
+        assert filter.is_relevant("HPG báo lãi quý 2", "Giá thép tăng") is True
 
     def test_noise_match_is_accent_and_case_insensitive(self):
-        assert rss_filter.is_relevant("SINH NHẬT công ty", "") is False
+        assert filter.is_relevant("SINH NHẬT công ty", "") is False
 
 
 # --- rss_fetcher -----------------------------------------------------------
+_TS = time.struct_time((2026, 7, 17, 3, 0, 0, 0, 0, 0))
+
+
 def _parsed(entries, bozo=0, exc=None):
     return SimpleNamespace(bozo=bozo, bozo_exception=exc, entries=entries)
 
@@ -79,47 +81,95 @@ def _fake_response(content: bytes = b""):
     return SimpleNamespace(content=content, raise_for_status=lambda: None)
 
 
+def _entry(url: str, **overrides):
+    """A feed entry that is valid by default.
+
+    `published_parsed` is required by _entry_to_article — entries without it
+    are dropped — so it is included here and overridden only when a test is
+    deliberately exercising the drop path.
+    """
+    return {
+        "link": url,
+        "title": "t",
+        "summary": "s",
+        "published_parsed": _TS,
+        **overrides,
+    }
+
+
 class TestFetchFeed:
     def test_captures_all_required_fields(self, monkeypatch):
         entry = {
             "link": "https://cafef.vn/a.html",
             "title": "Tiêu đề",
             "summary": "Tóm tắt",
-            "published_parsed": time.struct_time((2026, 7, 17, 3, 0, 0, 0, 0, 0)),
+            "published_parsed": _TS,
         }
-        monkeypatch.setattr(rss_fetcher.requests, "get", lambda *a, **k: _fake_response())
-        monkeypatch.setattr(rss_fetcher.feedparser, "parse", lambda content: _parsed([entry]))
+        monkeypatch.setattr(
+            rss_fetcher.requests, "get", lambda *a, **k: _fake_response()
+        )
+        monkeypatch.setattr(
+            rss_fetcher.feedparser, "parse", lambda content: _parsed([entry])
+        )
 
         [article] = rss_fetcher.fetch_feed("CafeF", "http://feed")
 
-        assert article["url"] == "https://cafef.vn/a.html"
-        assert article["title"] == "Tiêu đề"
-        assert article["summary"] == "Tóm tắt"
-        assert article["source"] == "CafeF"
-        assert article["published_at"] is not None
+        assert article.url == "https://cafef.vn/a.html"
+        assert article.title == "Tiêu đề"
+        assert article.summary == "Tóm tắt"
+        assert article.source == "CafeF"
+        assert article.published_at is not None
 
     def test_entry_without_link_is_skipped(self, monkeypatch):
-        entries = [{"title": "no link"}, {"link": "https://x.vn/ok"}]
-        monkeypatch.setattr(rss_fetcher.requests, "get", lambda *a, **k: _fake_response())
-        monkeypatch.setattr(rss_fetcher.feedparser, "parse", lambda content: _parsed(entries))
+        entries = [{"title": "no link"}, _entry("https://x.vn/ok")]
+        monkeypatch.setattr(
+            rss_fetcher.requests, "get", lambda *a, **k: _fake_response()
+        )
+        monkeypatch.setattr(
+            rss_fetcher.feedparser, "parse", lambda content: _parsed(entries)
+        )
 
         result = rss_fetcher.fetch_feed("VnExpress", "http://feed")
 
-        assert [a["url"] for a in result] == ["https://x.vn/ok"]
+        assert [a.url for a in result] == ["https://x.vn/ok"]
 
-    def test_missing_timestamp_yields_none(self, monkeypatch):
-        entry = {"link": "https://x.vn/a", "title": "t", "summary": "s"}
-        monkeypatch.setattr(rss_fetcher.requests, "get", lambda *a, **k: _fake_response())
-        monkeypatch.setattr(rss_fetcher.feedparser, "parse", lambda content: _parsed([entry]))
+    def test_entry_without_date_is_dropped(self, monkeypatch):
+        # published_at drives recency decay, so a dateless article is unusable
+        # downstream and is discarded at ingestion rather than stored as null.
+        entries = [
+            _entry("https://x.vn/no-date", published_parsed=None),
+            _entry("https://x.vn/ok"),
+        ]
+        monkeypatch.setattr(
+            rss_fetcher.requests, "get", lambda *a, **k: _fake_response()
+        )
+        monkeypatch.setattr(
+            rss_fetcher.feedparser, "parse", lambda content: _parsed(entries)
+        )
+
+        result = rss_fetcher.fetch_feed("CafeF", "http://feed")
+
+        assert [a.url for a in result] == ["https://x.vn/ok"]
+
+    def test_url_is_normalized_on_ingest(self, monkeypatch):
+        # Dedup queries by normalized url, so the stored url must already be
+        # canonical or is_duplicate will never match.
+        entry = _entry("HTTP://CafeF.vn/a/?utm_source=rss")
+        monkeypatch.setattr(
+            rss_fetcher.requests, "get", lambda *a, **k: _fake_response()
+        )
+        monkeypatch.setattr(
+            rss_fetcher.feedparser, "parse", lambda content: _parsed([entry])
+        )
 
         [article] = rss_fetcher.fetch_feed("CafeF", "http://feed")
 
-        assert article["published_at"] is None
+        assert article.url == "https://cafef.vn/a"
 
 
 class TestFetchAllFeeds:
     def test_one_bad_feed_does_not_abort_run(self, monkeypatch):
-        good = {"link": "https://vnexpress.net/x.html", "title": "t", "summary": "s"}
+        good = _entry("https://vnexpress.net/x.html")
 
         def fake_get(url, *a, **k):
             if "bad" in url:
@@ -127,20 +177,26 @@ class TestFetchAllFeeds:
             return _fake_response()
 
         monkeypatch.setattr(rss_fetcher.requests, "get", fake_get)
-        monkeypatch.setattr(rss_fetcher.feedparser, "parse", lambda content: _parsed([good]))
+        monkeypatch.setattr(
+            rss_fetcher.feedparser, "parse", lambda content: _parsed([good])
+        )
 
         feeds = [("CafeF", "http://bad-feed"), ("VnExpress", "http://good-feed")]
         result = rss_fetcher.fetch_all_feeds(feeds)
 
         # The bad feed is skipped; the good one still contributes.
-        assert [a["source"] for a in result] == ["VnExpress"]
+        assert [a.source for a in result] == ["VnExpress"]
 
     def test_aggregates_across_feeds(self, monkeypatch):
-        monkeypatch.setattr(rss_fetcher.requests, "get", lambda *a, **k: _fake_response())
+        monkeypatch.setattr(
+            rss_fetcher.requests, "get", lambda *a, **k: _fake_response()
+        )
         monkeypatch.setattr(
             rss_fetcher.feedparser,
             "parse",
-            lambda content: _parsed([{"link": "https://x.vn/a"}, {"link": "https://x.vn/b"}]),
+            lambda content: _parsed(
+                [_entry("https://x.vn/a"), _entry("https://x.vn/b")]
+            ),
         )
 
         feeds = [("CafeF", "http://f1"), ("VnExpress", "http://f2")]

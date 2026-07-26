@@ -4,8 +4,6 @@ import logging
 
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
-
-
 logger = logging.getLogger(__name__)
 
 _client: AsyncIOMotorClient | None = None

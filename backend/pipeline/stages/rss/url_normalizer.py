@@ -6,6 +6,7 @@ string, or filter.py's dedup will treat them as different articles.
 Meaningful query params (e.g. ?id=123) are kept — they can distinguish
 genuinely different articles.
 """
+
 from __future__ import annotations
 
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
