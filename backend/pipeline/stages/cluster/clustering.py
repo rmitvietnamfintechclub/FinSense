@@ -1,4 +1,5 @@
 """Incremental cosine-similarity clustering implemented with NumPy."""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
@@ -98,7 +99,9 @@ def _coerce_cluster(value: ClusterInput, *, dimension: int | None) -> Cluster:
 
     vector = np.asarray(centroid)
     if vector.ndim != 1 or vector.size == 0:
-        raise ValueError("centroid_embedding must be a non-empty one-dimensional vector")
+        raise ValueError(
+            "centroid_embedding must be a non-empty one-dimensional vector"
+        )
     if not np.issubdtype(vector.dtype, np.number):
         raise TypeError("centroid_embedding must contain numeric values")
     vector = vector.astype(np.result_type(vector.dtype, np.float32), copy=True)
@@ -107,7 +110,9 @@ def _coerce_cluster(value: ClusterInput, *, dimension: int | None) -> Cluster:
     if np.linalg.norm(vector) == 0:
         raise ValueError("centroid_embedding must not be a zero vector")
     if dimension is not None and vector.shape[0] != dimension:
-        raise ValueError("all centroids and article embeddings must have the same dimension")
+        raise ValueError(
+            "all centroids and article embeddings must have the same dimension"
+        )
 
     return Cluster(
         cluster_id=cluster_id,
@@ -117,7 +122,9 @@ def _coerce_cluster(value: ClusterInput, *, dimension: int | None) -> Cluster:
 
 
 def _validate_threshold(similarity_threshold: float) -> float:
-    if isinstance(similarity_threshold, bool) or not isinstance(similarity_threshold, Real):
+    if isinstance(similarity_threshold, bool) or not isinstance(
+        similarity_threshold, Real
+    ):
         raise TypeError("similarity_threshold must be a real number")
     threshold = float(similarity_threshold)
     if not np.isfinite(threshold) or not -1.0 <= threshold <= 1.0:

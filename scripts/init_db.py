@@ -4,15 +4,16 @@ Run once to create collections, indexes, and seed static_ontology + concept_dict
 Usage: MONGODB_URI=... python backend/scripts/init_db.py
 """
 
-import os
 from datetime import datetime, timezone
-from pymongo import MongoClient, ASCENDING, DESCENDING
-from pymongo.errors import CollectionInvalid
 
 import certifi
+from pymongo import ASCENDING, DESCENDING, MongoClient
+from pymongo.errors import CollectionInvalid
 
-MONGO_URI = os.environ["MONGODB_URI"]
-DB_NAME = "FinSense"
+from backend.core.config import database_settings
+
+MONGO_URI = database_settings.MONGODB_URI
+DB_NAME = database_settings.MONGODB_DB_NAME
 
 client = MongoClient(MONGO_URI, tlsCAFile=certifi.where())
 db = client[DB_NAME]
@@ -166,7 +167,15 @@ def seed_concept_dictionary():
         },
         {
             "concept": "REAL_ESTATE",
-            "aliases": ["BĐS", "BDS", "PROPERTY", "Bất động sản", "Nhà đất", "Địa ốc", "bat dong san"],
+            "aliases": [
+                "BĐS",
+                "BDS",
+                "PROPERTY",
+                "Bất động sản",
+                "Nhà đất",
+                "Địa ốc",
+                "bat dong san",
+            ],
         },
         {
             "concept": "OIL_GAS",
@@ -186,7 +195,13 @@ def seed_concept_dictionary():
         },
         {
             "concept": "LOGISTICS",
-            "aliases": ["Logistics", "vận tải", "van tai", "transportation", "vận chuyển"],
+            "aliases": [
+                "Logistics",
+                "vận tải",
+                "van tai",
+                "transportation",
+                "vận chuyển",
+            ],
         },
         {
             "concept": "TECHNOLOGY",
@@ -194,15 +209,39 @@ def seed_concept_dictionary():
         },
         {
             "concept": "MACRO",
-            "aliases": ["Vĩ mô", "vi mo", "macro", "GDP", "CPI", "lạm phát", "lam phat", "kinh tế vĩ mô"],
+            "aliases": [
+                "Vĩ mô",
+                "vi mo",
+                "macro",
+                "GDP",
+                "CPI",
+                "lạm phát",
+                "lam phat",
+                "kinh tế vĩ mô",
+            ],
         },
         {
             "concept": "MONETARY_POLICY",
-            "aliases": ["Chính sách tiền tệ", "NHNN", "lãi suất", "lai suat", "tín phiếu", "tin phieu", "Fed"],
+            "aliases": [
+                "Chính sách tiền tệ",
+                "NHNN",
+                "lãi suất",
+                "lai suat",
+                "tín phiếu",
+                "tin phieu",
+                "Fed",
+            ],
         },
         {
             "concept": "CONSTRUCTION_MATERIALS",
-            "aliases": ["Vật liệu xây dựng", "VLXD", "xi măng", "xi mang", "cement", "vật liệu"],
+            "aliases": [
+                "Vật liệu xây dựng",
+                "VLXD",
+                "xi măng",
+                "xi mang",
+                "cement",
+                "vật liệu",
+            ],
         },
     ]
 

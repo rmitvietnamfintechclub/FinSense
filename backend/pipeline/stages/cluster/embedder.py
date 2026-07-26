@@ -11,7 +11,8 @@ from backend.core.schemas.article import Article
 
 logger = logging.getLogger(__name__)
 
-@lru_cache(maxsize=1)   # Load the sentence-transformer model once per process
+
+@lru_cache(maxsize=1)  # Load the sentence-transformer model once per process
 def _get_model() -> SentenceTransformer:
     model = SentenceTransformer(pipeline_settings.EMBEDDING_MODEL_NAME)
     logger.info(
@@ -31,7 +32,10 @@ def _build_embedding_text(article: Article) -> str:
     summary = article.summary.strip()
 
     if not title and not summary:
-        logger.warning("Article has no title or summary, embedding prefix-only text: %s", article.url)
+        logger.warning(
+            "Article has no title or summary, embedding prefix-only text: %s",
+            article.url,
+        )
 
     text = " ".join(part for part in (title, summary) if part)
     return f"{pipeline_settings.E5_QUERY_PREFIX}{text}"
@@ -44,6 +48,9 @@ def embed_articles(articles: list[Article]) -> np.ndarray:
     model = _get_model()
     texts = [_build_embedding_text(article) for article in articles]
     embeddings = model.encode(
-        texts, batch_size=pipeline_settings.EMBEDDING_BATCH_SIZE, convert_to_numpy=True, show_progress_bar=False
+        texts,
+        batch_size=pipeline_settings.EMBEDDING_BATCH_SIZE,
+        convert_to_numpy=True,
+        show_progress_bar=False,
     )
     return embeddings.astype(np.float32)

@@ -1,4 +1,5 @@
 """EventCluster — persisted document contract for the `event_clusters` collection."""
+
 from __future__ import annotations
 
 from datetime import datetime

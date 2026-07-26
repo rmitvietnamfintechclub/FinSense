@@ -8,6 +8,7 @@ Two independent filters:
   promotions). The noise vocabulary lives in the lexicon so it can be
   edited without touching code.
 """
+
 from __future__ import annotations
 
 import json
@@ -37,7 +38,9 @@ def _load_noise_keywords() -> list[str]:
         data = json.loads(_KEYWORDS_PATH.read_text(encoding="utf-8"))
         return data.get("noise_keywords", [])
     except FileNotFoundError:
-        logger.warning(f"relevance_keywords.json not found at {_KEYWORDS_PATH}, noise filter disabled")
+        logger.warning(
+            f"relevance_keywords.json not found at {_KEYWORDS_PATH}, noise filter disabled"
+        )
         return []
     except json.JSONDecodeError as e:
         logger.warning(f"relevance_keywords.json is malformed: {e}")

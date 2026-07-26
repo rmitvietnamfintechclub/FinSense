@@ -1,9 +1,10 @@
 import logging
 
-from .adapters import cafef, vnexpress
 from backend.core.text_utils import strip_html
 
-logger = logging.getLogger("scraper.source_client")
+from .adapters import cafef, vnexpress
+
+logger = logging.getLogger(__name__)
 
 # Keyed by lowercased source name so lookups tolerate whatever casing the
 # rss stage tagged the article with ("CafeF", "cafef", " VnExpress ").

@@ -4,6 +4,7 @@ Consumes a `Cluster` produced by `clustering.cluster_articles` plus the batch of
 `Article`/embedding rows it was computed from, and turns that into the
 `EventCluster` document persisted to the `event_clusters` collection.
 """
+
 from __future__ import annotations
 
 import logging
@@ -25,7 +26,12 @@ from backend.core.schemas.event_cluster import (
     RepresentativeArticle,
     SourceBreakdown,
 )
-from backend.pipeline.stages.cluster.clustering import Cluster, ClusterInput, cluster_articles, cosine_similarity
+from backend.pipeline.stages.cluster.clustering import (
+    Cluster,
+    ClusterInput,
+    cluster_articles,
+    cosine_similarity,
+)
 from backend.pipeline.stages.cluster.embedder import embed_articles
 
 logger = logging.getLogger(__name__)
@@ -47,14 +53,16 @@ def select_source_representatives(
     best: dict[str, RepresentativeArticle] = dict(existing or {})
     for article_index in cluster.article_indices:
         article = articles[article_index]
-        similarity = cosine_similarity(embeddings[article_index], cluster.centroid_embedding)
+        similarity = cosine_similarity(
+            embeddings[article_index], cluster.centroid_embedding
+        )
         current = best.get(article.source)
         if current is not None and current.centroid_similarity >= similarity:
             continue
         best[article.source] = RepresentativeArticle(
             url=article.url,
             published_at=article.published_at,
-            content_fed_to_ai= None,
+            content_fed_to_ai=None,
             centroid_similarity=similarity,
         )
     return best
@@ -67,7 +75,8 @@ def merge_event_coverage(
 ) -> EventCoverage:
     """Fold this batch's newly-assigned articles into the full member/URL list."""
     all_urls: dict[str, list[str]] = {
-        source: list(urls) for source, urls in (existing.all_urls if existing else {}).items()
+        source: list(urls)
+        for source, urls in (existing.all_urls if existing else {}).items()
     }
     for article_index in cluster.article_indices:
         article = articles[article_index]
@@ -79,7 +88,9 @@ def merge_event_coverage(
     return EventCoverage(total_articles=total_articles, all_urls=all_urls)
 
 
-def _pick_event_title(articles: Sequence[Article], embeddings: NDArray[np.floating], cluster: Cluster) -> str:
+def _pick_event_title(
+    articles: Sequence[Article], embeddings: NDArray[np.floating], cluster: Cluster
+) -> str:
     best_index = max(
         cluster.article_indices,
         key=lambda i: cosine_similarity(embeddings[i], cluster.centroid_embedding),
@@ -96,15 +107,27 @@ def build_event_cluster(
 ) -> EventCluster:
     """Build the EventCluster document for `cluster`, merging in `existing` state if any."""
     if not cluster.article_indices and existing is None:
-        raise ValueError("cluster has no assigned articles and no existing document to update")
+        raise ValueError(
+            "cluster has no assigned articles and no existing document to update"
+        )
 
     existing_representatives = (
-        {entry.source: entry.representative_article for entry in existing.source_breakdown} if existing else None
+        {
+            entry.source: entry.representative_article
+            for entry in existing.source_breakdown
+        }
+        if existing
+        else None
     )
-    representatives = select_source_representatives(articles, embeddings, cluster, existing_representatives)
+    representatives = select_source_representatives(
+        articles, embeddings, cluster, existing_representatives
+    )
 
     existing_extras = (
-        {entry.source: (entry.ai_response, entry.is_audited) for entry in existing.source_breakdown}
+        {
+            entry.source: (entry.ai_response, entry.is_audited)
+            for entry in existing.source_breakdown
+        }
         if existing
         else {}
     )
@@ -118,10 +141,16 @@ def build_event_cluster(
         for source, representative in sorted(representatives.items())
     ]
 
-    event_coverage = merge_event_coverage(articles, cluster, existing.event_coverage if existing else None)
+    event_coverage = merge_event_coverage(
+        articles, cluster, existing.event_coverage if existing else None
+    )
 
     if event_title is None:
-        event_title = existing.event_title if existing else _pick_event_title(articles, embeddings, cluster)
+        event_title = (
+            existing.event_title
+            if existing
+            else _pick_event_title(articles, embeddings, cluster)
+        )
 
     now = datetime.now(timezone.utc)
     return EventCluster(
@@ -131,12 +160,16 @@ def build_event_cluster(
         updated_at=now,
         centroid_embedding=cluster.centroid_embedding.tolist(),
         event_coverage=event_coverage,
-        aggregated_analysis=existing.aggregated_analysis if existing else AggregatedAnalysis(),
+        aggregated_analysis=existing.aggregated_analysis
+        if existing
+        else AggregatedAnalysis(),
         source_breakdown=source_breakdown,
     )
 
 
-def save_event_cluster(cluster: EventCluster, collection: Collection | None = None) -> None:
+def save_event_cluster(
+    cluster: EventCluster, collection: Collection | None = None
+) -> None:
     if collection is None:
         collection = get_database().event_clusters
 
@@ -166,7 +199,9 @@ def upsert_event_cluster(
     existing_doc = collection.find_one({"cluster_id": cluster.cluster_id})
     existing = EventCluster.model_validate(existing_doc) if existing_doc else None
 
-    event_cluster = build_event_cluster(articles, embeddings, cluster, existing=existing)
+    event_cluster = build_event_cluster(
+        articles, embeddings, cluster, existing=existing
+    )
     save_event_cluster(event_cluster, collection=collection)
     return event_cluster
 
@@ -191,7 +226,11 @@ def load_existing_clusters(
     return list(
         collection.find(
             {"updated_at": {"$gte": cutoff}},
-            {"cluster_id": 1, "centroid_embedding": 1, "event_coverage.total_articles": 1},
+            {
+                "cluster_id": 1,
+                "centroid_embedding": 1,
+                "event_coverage.total_articles": 1,
+            },
         )
     )
 
@@ -211,7 +250,9 @@ def backfill_article_cluster_ids(
         collection = get_database().articles
 
     for article, cluster_id in zip(articles, assignments, strict=True):
-        collection.update_one({"url": article.url}, {"$set": {"cluster_id": cluster_id}})
+        collection.update_one(
+            {"url": article.url}, {"$set": {"cluster_id": cluster_id}}
+        )
 
 
 def _generate_cluster_id(_article_index: int) -> str:
@@ -223,7 +264,7 @@ def _generate_cluster_id(_article_index: int) -> str:
     return f"evt_{uuid.uuid4().hex[:12]}"
 
 
-def run_cluster_stage(
+def run_cluster(
     articles: Sequence[Article],
     event_clusters: Collection | None = None,
     articles_collection: Collection | None = None,
@@ -249,7 +290,9 @@ def run_cluster_stage(
 
     embeddings = embed_articles(list(articles))
     existing = load_existing_clusters(event_clusters)
-    result = cluster_articles(embeddings, existing, cluster_id_factory=_generate_cluster_id)
+    result = cluster_articles(
+        embeddings, existing, cluster_id_factory=_generate_cluster_id
+    )
 
     saved = [
         upsert_event_cluster(articles, embeddings, cluster, collection=event_clusters)
@@ -257,5 +300,7 @@ def run_cluster_stage(
         if cluster.article_indices
     ]
 
-    backfill_article_cluster_ids(articles, result.assignments, collection=articles_collection)
+    backfill_article_cluster_ids(
+        articles, result.assignments, collection=articles_collection
+    )
     return saved

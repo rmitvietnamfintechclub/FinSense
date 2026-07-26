@@ -8,17 +8,18 @@ The benchmark deliberately includes hard negatives that mention the same
 company or topic but describe a different event. It is not part of the fast
 unit suite because it loads the configured sentence-transformer model.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+
 import numpy as np
 
 from backend.core.schemas.article import Article
 from backend.pipeline.stages.cluster.centroid import calculate_centroid
 from backend.pipeline.stages.cluster.clustering import cosine_similarity
 from backend.pipeline.stages.cluster.embedder import embed_articles
-
 
 EVENTS = (
     (
@@ -120,7 +121,9 @@ def _article(title: str) -> Article:
     )
 
 
-def _metrics(positive_scores: np.ndarray, negative_scores: np.ndarray, threshold: float) -> Metrics:
+def _metrics(
+    positive_scores: np.ndarray, negative_scores: np.ndarray, threshold: float
+) -> Metrics:
     true_positives = int(np.sum(positive_scores >= threshold))
     false_negatives = int(np.sum(positive_scores < threshold))
     true_negatives = int(np.sum(negative_scores < threshold))
@@ -155,7 +158,9 @@ def _score_benchmark() -> tuple[np.ndarray, np.ndarray]:
         for held_out_index in range(group.shape[0]):
             training_rows = np.delete(group, held_out_index, axis=0)
             positive_scores.append(
-                cosine_similarity(group[held_out_index], calculate_centroid(training_rows))
+                cosine_similarity(
+                    group[held_out_index], calculate_centroid(training_rows)
+                )
             )
             negative_scores.extend(
                 cosine_similarity(group[held_out_index], full_centroids[other_index])
@@ -173,10 +178,14 @@ def _score_benchmark() -> tuple[np.ndarray, np.ndarray]:
 def main() -> None:
     positive_scores, negative_scores = _score_benchmark()
     candidates = np.round(np.arange(0.90, 0.991, 0.01), 2)
-    results = [_metrics(positive_scores, negative_scores, float(value)) for value in candidates]
+    results = [
+        _metrics(positive_scores, negative_scores, float(value)) for value in candidates
+    ]
     # F1 penalizes missed matches and false merges equally. On the tested
     # hundredth-resolution grid this chooses 0.91 without a round-number guess.
-    selected = max(results, key=lambda result: (result.f1, result.precision, result.threshold))
+    selected = max(
+        results, key=lambda result: (result.f1, result.precision, result.threshold)
+    )
 
     print(
         "positive centroid scores "

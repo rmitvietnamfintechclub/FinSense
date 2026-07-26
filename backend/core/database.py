@@ -1,4 +1,5 @@
 """Shared MongoDB connection — single client per process, used by both the API and the pipeline."""
+
 from __future__ import annotations
 
 from functools import lru_cache
@@ -14,7 +15,9 @@ from backend.core.config import database_settings
 def get_client() -> MongoClient:
     if not database_settings.MONGODB_URI:
         raise RuntimeError("MONGODB_URI is not set")
-    return MongoClient(database_settings.MONGODB_URI, tlsCAFile=certifi.where())
+    return MongoClient(database_settings.MONGODB_URI,
+                        tlsCAFile=certifi.where(),
+                        tz_aware=True,)
 
 
 def get_database() -> Database:
