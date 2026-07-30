@@ -34,8 +34,8 @@ def _log_failure(failure_type: str, message: str, *, code: int | None = None) ->
     )
 
 
-def run_extract(article_text: str) -> ExtractionOutput | None:
-    # client.py imports gemini.py, which uses LLMSettings() 
+def run_extract(article_text: str) -> tuple[ExtractionOutput | None, str | None]:
+    # client.py imports gemini.py, which uses LLMSettings()
     # ValidationError when client.py is first imported, not when it's called.
     # The import is deferred into this try block so that failure is caught
     # here instead of crashing whatever module imports response_parser.
@@ -43,22 +43,25 @@ def run_extract(article_text: str) -> ExtractionOutput | None:
         from backend.pipeline.stages.extract.llm.client import extract_sentiment
     except ValidationError as exc:
         _log_failure("missing_config", str(exc))
-        return None
+        return None, None
 
     try:
-        result, _model_version = extract_sentiment(article_text)
+        result, model_version = extract_sentiment(article_text)
     except ValidationError as exc:
         _log_failure("missing_config", str(exc))
-        return None
+        return None, None
     except httpx.TimeoutException as exc:
         _log_failure("gemini_timeout", str(exc))
-        return None
+        return None, None
     except APIError as exc:
         _log_failure("gemini_api_error", str(exc), code=getattr(exc, "code", None))
-        return None
+        return None, None
     except OutputParserException as exc:
         _log_failure("malformed_response", str(exc))
-        return None
+        return None, None
+    except Exception as exc:
+        _log_failure(f"unexpected_error[{type(exc).__name__}]", str(exc))
+        return None, None
 
     valid_ticker_sentiments = [
         item for item in result.ticker_sentiments if item.ticker in _VALID_TICKERS
@@ -71,9 +74,10 @@ def run_extract(article_text: str) -> ExtractionOutput | None:
         else:
             log_unmapped_concept(item.concept)
 
-    return result.model_copy(
+    filtered_result = result.model_copy(
         update={
             "ticker_sentiments": valid_ticker_sentiments,
             "concept_sentiments": valid_concept_sentiments,
         }
     )
+    return filtered_result, model_version
