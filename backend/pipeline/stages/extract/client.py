@@ -1,6 +1,8 @@
-from backend.core.config import pipeline_settings
-from langchain_google_genai import ChatGoogleGenerativeAI
 from functools import lru_cache
+
+from langchain_google_genai import ChatGoogleGenerativeAI
+
+from backend.core.config import pipeline_settings
 from backend.core.enums import Concept, Ticker
 
 TICKER_LIST = [t.value for t in Ticker]

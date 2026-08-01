@@ -1,10 +1,11 @@
+from functools import cache
 from pathlib import Path
-from functools import lru_cache
+
 from backend.core.config import pipeline_settings
 
 _PROMPTS_DIR = Path(__file__).parent / "prompts"
 
-@lru_cache(maxsize=None)
+@cache
 def _load_template(version: str) -> str:
     return (_PROMPTS_DIR / f"{version}.txt").read_text(encoding="utf-8")
 

@@ -6,7 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from backend.core.schemas.sentiment import AIResponse, AggregatedAnalysis
+from backend.core.schemas.sentiment import AggregatedAnalysis, AIResponse
 
 
 class RepresentativeArticle(BaseModel):

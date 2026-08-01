@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from backend.core.enums import Ticker, Concept
+from backend.core.enums import Concept, Ticker
 
 
 class TickerSentiment(BaseModel):
