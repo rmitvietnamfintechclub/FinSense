@@ -90,6 +90,7 @@ Core collection. One document per event. Written by pipeline, read by serving AP
         ],
         "ai_confidence": "float [0.0, 1.0]",
         "model_version": "string — e.g. 'gemini-1.5-flash'",
+        "prompt_version": "string - e.g. 'v1'",
       },
       "is_audited": "boolean — false until admin approves or corrects",
     }

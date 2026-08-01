@@ -4,20 +4,18 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class DatabaseSettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    # Optional at import time — validated when a connection is actually opened,
-    # so modules that merely import config.py don't require a configured DB.
     MONGODB_URI: str = ""
     MONGODB_DB_NAME: str = "FinSense"
 
 
 class PipelineSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     # Embedding Config
     EMBEDDING_MODEL_NAME: str = "intfloat/multilingual-e5-base"
     EMBEDDING_BATCH_SIZE: int = 32
     E5_QUERY_PREFIX: str = "query: "
     CLUSTER_SIMILARITY_THRESHOLD: float = 0.91
-    # Unlike CLUSTER_SIMILARITY_THRESHOLD, this window is not benchmark-calibrated —
-    # it's a placeholder for how long an event keeps accepting new articles.
     CLUSTER_LOOKBACK_DAYS: int = 3
 
     # RSS Discovery Config
@@ -35,6 +33,11 @@ class PipelineSettings(BaseSettings):
         )
     }
 
+    # LLM Settings
+    LLM_API_KEY: str = ""
+    LLM_MODEL_NAME: str = "gemini-2.5-flash"
+    EXTRACTION_TEMPERATURE: float = 0.0
+    PROMPT_VERSION: str = "v1"
 
 class APISettings(BaseSettings):
     pass
