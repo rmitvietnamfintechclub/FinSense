@@ -1,5 +1,4 @@
-from enum import StrEnum
-
+from backend.core._compat import StrEnum
 
 class Ticker(StrEnum):
     """VN30 ticker symbols.

@@ -40,7 +40,15 @@ class PipelineSettings(BaseSettings):
     PROMPT_VERSION: str = "v1"
 
 class APISettings(BaseSettings):
-    pass
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    DECAY_LAMBDA: dict[str, float] = {
+        "24h": 0.192,
+        "48h": 0.096,
+        "72h": 0.064,
+    }
+    CONFIDENCE_THRESHOLD: float = 0.4
+    SENTIMENT_BUCKET_THRESHOLD: float = 0.2
 
 
 database_settings = DatabaseSettings()

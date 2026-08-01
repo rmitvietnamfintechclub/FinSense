@@ -151,3 +151,27 @@ def blend_s_final(
         return SFinalResult(score=0.0, is_empty=True)
 
     return SFinalResult(score=numerator / denominator, is_empty=False)
+
+
+# ============================================================
+# Sentiment bucketing — FS-23 Dashboard Gauge
+# ============================================================
+
+
+def bucket_sentiment(score: float, threshold: float) -> str:
+    """
+    Phan loai 1 diem so thanh "positive" / "neutral" / "negative".
+
+    threshold: nguong duong tinh (vd 0.2) — score > threshold la
+    "positive", score < -threshold la "negative", con lai la "neutral".
+    Doi xung 2 chieu, chi can 1 con so duy nhat.
+
+    threshold PHAI truyen tu APISettings.SENTIMENT_BUCKET_THRESHOLD o
+    call site — chua co gia tri chinh thuc tu lead, dang la DE XUAT
+    (0.2), can xac nhan truoc khi coi la final.
+    """
+    if score > threshold:
+        return "positive"
+    if score < -threshold:
+        return "negative"
+    return "neutral"
