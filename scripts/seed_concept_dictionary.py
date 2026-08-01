@@ -36,6 +36,9 @@ def validate_lexicon(entries: list[dict]) -> None:
 
     seen_concepts: set[str] = set()
     for entry in entries:
+        if not isinstance(entry, dict):
+            errors.append(f"Entry is not an object: {entry!r}")
+            continue
         concept = entry.get("concept")
         aliases = entry.get("aliases")
         if not isinstance(concept, str) or not concept:
