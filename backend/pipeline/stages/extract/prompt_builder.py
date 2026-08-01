@@ -1,11 +1,14 @@
 from pathlib import Path
+from functools import lru_cache
+from backend.core.config import pipeline_settings
 
-_PROMPTS_DIR = Path(__file__).parent / "llm" / "prompts"
+_PROMPTS_DIR = Path(__file__).parent / "prompts"
 
-# only v1 right now, later evolutions will select the latest version
-# configurable instead of hardcoding it here.
-_ACTIVE_PROMPT_VERSION = "v1"
+@lru_cache(maxsize=None)
+def _load_template(version: str) -> str:
+    return (_PROMPTS_DIR / f"{version}.txt").read_text(encoding="utf-8")
 
-def build_prompt(article_text: str) -> str:
-    template = (_PROMPTS_DIR / f"{_ACTIVE_PROMPT_VERSION}.txt").read_text(encoding="utf-8")
-    return template.format(article_text=article_text)
+def build_prompt(article_text: str) -> tuple[str, str]:
+    prompt_version = pipeline_settings.PROMPT_VERSION
+    template = _load_template(prompt_version)
+    return template.replace("{article_text}", article_text), prompt_version

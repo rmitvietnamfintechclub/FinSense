@@ -9,6 +9,8 @@ class DatabaseSettings(BaseSettings):
 
 
 class PipelineSettings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
     # Embedding Config
     EMBEDDING_MODEL_NAME: str = "intfloat/multilingual-e5-base"
     EMBEDDING_BATCH_SIZE: int = 32
@@ -31,21 +33,16 @@ class PipelineSettings(BaseSettings):
         )
     }
 
-
-class LLMSettings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
-
-    GEMINI_API_KEY: str
-    GEMINI_MODEL_NAME: str = "gemini-1.5-flash"
-
+    # LLM Settings
+    LLM_API_KEY: str = ""
+    LLM_MODEL_NAME: str = "gemini-2.5-flash"
+    EXTRACTION_TEMPERATURE: float = 0.0
+    PROMPT_VERSION: str = "v1"
 
 class APISettings(BaseSettings):
     pass
 
-# harcoded temperature 
-EXTRACTION_TEMPERATURE: float = 0.0
 
 database_settings = DatabaseSettings()
 pipeline_settings = PipelineSettings()
-llm_settings = LLMSettings()
 api_settings = APISettings()
