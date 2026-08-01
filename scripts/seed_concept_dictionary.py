@@ -8,6 +8,7 @@ from pathlib import Path
 
 import certifi
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
 from backend.core.config import database_settings
 from backend.core.enums import Concept
@@ -109,7 +110,7 @@ if __name__ == "__main__":
         # Force connection now so failures surface here with a clear message,
         # rather than deep inside the first update_one() call.
         client.admin.command("ping")
-    except Exception as exc:
+    except PyMongoError as exc:
         print(f"Could not connect to MongoDB at the configured URI: {exc}")
         sys.exit(1)
 
