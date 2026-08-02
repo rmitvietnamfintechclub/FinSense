@@ -115,7 +115,6 @@ rss/filter          → drop duplicates and irrelevant articles
 scraper/source_client  → route URL to correct adapter
 scraper/adapters/      → fetch full HTML body, extract and strip article text
 cluster/            → embed, cluster, select centroids
->>>>>>> dev
 extract/            → send centroid text to Gemini, parse response
 aggregate/          → compute EOD scores, write to MongoDB
 ```
