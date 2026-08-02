@@ -156,6 +156,5 @@ if __name__ == "__main__":
     setup_collections()
     setup_indexes()
     seed_static_ontology()
-    seed_concept_dictionary()
     print("\nDone. Verify in Atlas UI → Browse Collections.")
     client.close()
