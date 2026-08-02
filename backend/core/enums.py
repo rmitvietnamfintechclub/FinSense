@@ -1,7 +1,7 @@
-from enum import StrEnum
+from enum import Enum
 
 
-class Ticker(StrEnum):
+class Ticker(str, Enum):
     """VN30 ticker symbols.
 
     Source: HOSE VN30 quarterly review, announced 15/07/2026, effective 03/08/2026
@@ -44,7 +44,7 @@ class Ticker(StrEnum):
     VRE = "VRE"
 
 
-class Concept(StrEnum):
+class Concept(str, Enum):
     """Macro/sector concept taxonomy for VN30 sentiment scoring.
 
     This is a designed taxonomy fitted to the real sector composition of the
