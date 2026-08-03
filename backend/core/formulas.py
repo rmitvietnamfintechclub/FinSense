@@ -16,26 +16,7 @@ def confidence_weighted_avg(
     *,
     threshold: float = 0.0,
 ) -> float | None:
-    """
-    Confidence-weighted average of per-source sentiment scores:
 
-        S_event = Σ(S_source_i × Confidence_i) / Σ(Confidence_i)
-
-    Each source's AI confidence acts as its weight, so a score the model
-    was sure about pulls the event score harder than a hesitant one.
-
-    Sources with `confidence < threshold` are dropped from *both* the
-    numerator and the denominator — they do not dilute the result. The
-    default threshold of 0.0 keeps every source (an identity filter); the
-    real policy value lives in config (AI_CONFIDENCE_THRESHOLD) and is
-    passed in by the caller.
-
-    Returns None — never 0.0 — when no source survives the threshold or
-    the surviving weights sum to zero. None means "no confident read",
-    which is a different thing from a neutral 0.0 sentiment.
-
-    Raises ValueError if the two sequences differ in length.
-    """
     if len(scores) != len(confidences):
         raise ValueError(
             f"scores and confidences must be the same length, "

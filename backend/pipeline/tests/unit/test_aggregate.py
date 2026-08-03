@@ -1,15 +1,37 @@
+"""Unit tests for event-level aggregation.
+
+Three layers, deliberately separated:
+  1. confidence_weighted_avg   — pure math, no models, no I/O
+  2. build_aggregated_analysis — shaping real EventCluster sub-models
+  3. run_aggregate             — orchestration and persistence
+"""
+
 from __future__ import annotations
 
-import copy
+from datetime import datetime, timezone
 
 import pytest
 
 from backend.core.config import pipeline_settings
+from backend.core.enums import Concept, Ticker
 from backend.core.formulas import confidence_weighted_avg
-from backend.pipeline.stages.aggregate.event_aggregator import (
-    build_aggregated_analysis,
-    run_aggregate,
+from backend.core.schemas.event_cluster import (
+    EventCluster,
+    EventCoverage,
+    RepresentativeArticle,
+    SourceBreakdown,
 )
+from backend.core.schemas.sentiment import (
+    AIResponse,
+    ConceptSentiment,
+    TickerSentiment,
+)
+from backend.pipeline.stages.aggregate.event_aggregator import build_aggregated_analysis
+from backend.pipeline.stages.aggregate.stage import run_aggregate
+
+# --------------------------------------------------------------------------
+# Layer 1: the math
+# --------------------------------------------------------------------------
 
 
 class TestConfidenceWeightedAvg:
@@ -26,7 +48,8 @@ class TestConfidenceWeightedAvg:
         assert confidence_weighted_avg([0.75], [0.05]) == pytest.approx(0.75)
 
     def test_equal_confidences_reduce_to_plain_mean(self):
-        assert confidence_weighted_avg([0.2, 0.4, 0.9], [0.7, 0.7, 0.7]) == pytest.approx(0.5)
+        result = confidence_weighted_avg([0.2, 0.4, 0.9], [0.7, 0.7, 0.7])
+        assert result == pytest.approx(0.5)
 
     def test_higher_confidence_source_pulls_harder(self):
         # Same two scores, confidence flipped -> result moves toward the
@@ -97,143 +120,284 @@ class TestThresholdConfig:
         assert pipeline_settings.AI_CONFIDENCE_THRESHOLD == pytest.approx(0.4)
 
 
-def _source(confidence, tickers=(), concepts=()):
-    return {
-        "source": "CafeF",
-        "ai_response": {
-            "ticker_sentiments": [{"ticker": t, "score": s} for t, s in tickers],
-            "concept_sentiments": [{"concept": c, "score": s} for c, s in concepts],
-            "ai_confidence": confidence,
-            "model_version": "gemini-1.5-flash",
-        },
-        "is_audited": False,
-    }
+# --------------------------------------------------------------------------
+# Fixtures: real schema objects, not hand-rolled dicts
+# --------------------------------------------------------------------------
+
+
+def _source(
+    confidence: float,
+    tickers=(),
+    concepts=(),
+    source: str = "CafeF",
+) -> SourceBreakdown:
+    """One SourceBreakdown entry with a populated ai_response."""
+    return SourceBreakdown(
+        source=source,
+        representative_article=RepresentativeArticle(
+            url=f"https://{source.lower()}.vn/{confidence}",
+            published_at=datetime.now(timezone.utc),
+            centroid_similarity=0.95,
+        ),
+        ai_response=AIResponse(
+            ticker_sentiments=[TickerSentiment(ticker=t, score=s) for t, s in tickers],
+            concept_sentiments=[
+                ConceptSentiment(concept=c, score=s) for c, s in concepts
+            ],
+            ai_confidence=confidence,
+            model_version="gemini-2.5-flash",
+            prompt_version="v1",
+        ),
+    )
+
+
+def _unextracted_source(source: str = "CafeF") -> SourceBreakdown:
+    """A source the extract stage hasn't reached yet: ai_response is None."""
+    return SourceBreakdown(
+        source=source,
+        representative_article=RepresentativeArticle(
+            url=f"https://{source.lower()}.vn/pending",
+            published_at=datetime.now(timezone.utc),
+            centroid_similarity=0.95,
+        ),
+        ai_response=None,
+    )
+
+
+def _cluster(cluster_id: str = "evt_1", sources=None) -> EventCluster:
+    now = datetime.now(timezone.utc)
+    return EventCluster(
+        cluster_id=cluster_id,
+        event_title="HPG announces Q3 results",
+        created_at=now,
+        updated_at=now,
+        centroid_embedding=[0.1, 0.2, 0.3],
+        event_coverage=EventCoverage(total_articles=1),
+        source_breakdown=(
+            [_source(0.9, tickers=[(Ticker.HPG, 0.8)])] if sources is None else sources
+        ),
+    )
 
 
 class FakeCollection:
-    """Duck-typed stand-in for a pymongo collection (find + update_one)."""
+    """Duck-typed stand-in for a pymongo collection (update_one only).
 
-    def __init__(self, docs):
-        self.docs = {doc["_id"]: doc for doc in docs}
+    Asserts the write contract itself: $set, matched on cluster_id, and
+    only ever touching aggregated_analysis.
+    """
 
-    def find(self, query):
-        assert query == {}
-        return [copy.deepcopy(doc) for doc in self.docs.values()]
+    def __init__(self):
+        self.writes: list[tuple[str, dict]] = []
 
     def update_one(self, filter_, update):
-        (op, fields), = update.items()
-        assert op == "$set"
-        doc = self.docs[filter_["_id"]]
-        for key, value in fields.items():
-            assert "." not in key
-            doc[key] = value
+        ((operator, fields),) = update.items()
+        assert operator == "$set"
+        assert set(fields) == {"aggregated_analysis"}
+        assert set(filter_) == {"cluster_id"}
+        self.writes.append((filter_["cluster_id"], fields["aggregated_analysis"]))
+
+    @property
+    def payloads(self) -> dict[str, dict]:
+        return dict(self.writes)
+
+
+# --------------------------------------------------------------------------
+# Layer 2: document shaping
+# --------------------------------------------------------------------------
 
 
 class TestBuildAggregatedAnalysis:
     def test_aggregates_tickers_and_concepts_separately(self):
         analysis = build_aggregated_analysis(
             [
-                _source(0.9, tickers=[("HPG", 0.8)], concepts=[("STEEL", 0.6)]),
-                _source(0.5, tickers=[("HPG", 0.4)], concepts=[("STEEL", -0.2)]),
+                _source(
+                    0.9,
+                    tickers=[(Ticker.HPG, 0.8)],
+                    concepts=[(Concept.MATERIALS, 0.6)],
+                    source="CafeF",
+                ),
+                _source(
+                    0.5,
+                    tickers=[(Ticker.HPG, 0.4)],
+                    concepts=[(Concept.MATERIALS, -0.2)],
+                    source="VnExpress",
+                ),
             ],
             threshold=0.4,
         )
-        (hpg,) = analysis["ticker_sentiments"]
-        (steel,) = analysis["concept_sentiments"]
-        assert hpg["ticker"] == "HPG"
-        assert hpg["score"] == pytest.approx((0.8 * 0.9 + 0.4 * 0.5) / 1.4)
-        assert steel["concept"] == "STEEL"
-        assert steel["score"] == pytest.approx((0.6 * 0.9 - 0.2 * 0.5) / 1.4)
+        (hpg,) = analysis.ticker_sentiments
+        (materials,) = analysis.concept_sentiments
+        assert hpg.ticker is Ticker.HPG
+        assert hpg.score == pytest.approx((0.8 * 0.9 + 0.4 * 0.5) / 1.4)
+        assert materials.concept is Concept.MATERIALS
+        assert materials.score == pytest.approx((0.6 * 0.9 - 0.2 * 0.5) / 1.4)
 
-    def test_below_threshold_source_is_excluded(self):
+    def test_below_threshold_source_is_excluded_from_the_average(self):
         analysis = build_aggregated_analysis(
             [
-                _source(0.9, tickers=[("HPG", 0.8)]),
-                _source(0.2, tickers=[("HPG", -1.0)]),
+                _source(0.9, tickers=[(Ticker.HPG, 0.8)], source="CafeF"),
+                _source(0.2, tickers=[(Ticker.HPG, -1.0)], source="VnExpress"),
             ],
             threshold=0.4,
         )
-        (hpg,) = analysis["ticker_sentiments"]
-        assert hpg["score"] == pytest.approx(0.8)
-        assert analysis["needs_review"] is False
+        (hpg,) = analysis.ticker_sentiments
+        assert hpg.score == pytest.approx(0.8)
 
-    def test_all_sources_below_threshold_gives_null_and_review_flag(self):
+    def test_ticker_seen_only_by_a_weak_source_gets_null_not_zero(self):
+        # SSI was mentioned only by the weak source: it still appears (we
+        # know the event touched it) but with no confident read on it.
         analysis = build_aggregated_analysis(
             [
-                _source(0.3, tickers=[("HPG", 0.9)], concepts=[("STEEL", 0.5)]),
-                _source(0.1, tickers=[("HPG", -0.7)]),
+                _source(0.9, tickers=[(Ticker.HPG, 0.8)], source="CafeF"),
+                _source(0.2, tickers=[(Ticker.SSI, 0.5)], source="VnExpress"),
             ],
             threshold=0.4,
         )
-        (hpg,) = analysis["ticker_sentiments"]
-        (steel,) = analysis["concept_sentiments"]
-        # null, not 0 — the tickers still appear so we know what the event
-        # was about, but there is no confident read on them.
-        assert hpg["ticker"] == "HPG" and hpg["score"] is None
-        assert steel["concept"] == "STEEL" and steel["score"] is None
-        assert analysis["needs_review"] is True
+        scores = {t.ticker: t.score for t in analysis.ticker_sentiments}
+        assert scores[Ticker.HPG] == pytest.approx(0.8)
+        assert scores[Ticker.SSI] is None
 
-    def test_ticker_mentioned_only_by_weak_source_gets_null(self):
-        # Event itself has a confident source, so no review flag — but the
-        # ticker only weak sources mentioned still gets null, not 0.
+    def test_all_sources_below_threshold_gives_all_null_scores(self):
         analysis = build_aggregated_analysis(
             [
-                _source(0.9, tickers=[("HPG", 0.8)]),
-                _source(0.2, tickers=[("HSG", 0.5)]),
+                _source(
+                    0.3,
+                    tickers=[(Ticker.HPG, 0.9)],
+                    concepts=[(Concept.MATERIALS, 0.5)],
+                    source="CafeF",
+                ),
+                _source(0.1, tickers=[(Ticker.HPG, -0.7)], source="VnExpress"),
             ],
             threshold=0.4,
         )
-        scores = {t["ticker"]: t["score"] for t in analysis["ticker_sentiments"]}
-        assert scores["HPG"] == pytest.approx(0.8)
-        assert scores["HSG"] is None
-        assert analysis["needs_review"] is False
+        (hpg,) = analysis.ticker_sentiments
+        (materials,) = analysis.concept_sentiments
+        # Every score null is the signal for "no confident read on this
+        # event" — derived at read time, not stored as a flag.
+        assert hpg.score is None
+        assert materials.score is None
+        assert all(t.score is None for t in analysis.ticker_sentiments)
+
+    def test_confidence_equal_to_threshold_counts_as_a_confident_read(self):
+        analysis = build_aggregated_analysis(
+            [_source(0.4, tickers=[(Ticker.HPG, 0.6)])], threshold=0.4
+        )
+        (hpg,) = analysis.ticker_sentiments
+        assert hpg.score == pytest.approx(0.6)
+
+    def test_unextracted_source_is_skipped(self):
+        analysis = build_aggregated_analysis([_unextracted_source()], threshold=0.4)
+        assert analysis.ticker_sentiments == []
+        assert analysis.concept_sentiments == []
+
+    def test_unextracted_source_alongside_a_confident_one(self):
+        analysis = build_aggregated_analysis(
+            [
+                _source(0.9, tickers=[(Ticker.HPG, 0.8)], source="CafeF"),
+                _unextracted_source(source="VnExpress"),
+            ],
+            threshold=0.4,
+        )
+        (hpg,) = analysis.ticker_sentiments
+        assert hpg.score == pytest.approx(0.8)
 
     def test_empty_source_breakdown(self):
         analysis = build_aggregated_analysis([], threshold=0.4)
-        assert analysis["ticker_sentiments"] == []
-        assert analysis["concept_sentiments"] == []
-        assert analysis["needs_review"] is True
+        assert analysis.ticker_sentiments == []
+        assert analysis.concept_sentiments == []
+
+    def test_output_order_follows_first_mention(self):
+        analysis = build_aggregated_analysis(
+            [
+                _source(
+                    0.9,
+                    tickers=[(Ticker.VNM, 0.1), (Ticker.HPG, 0.2)],
+                    source="CafeF",
+                ),
+                _source(0.9, tickers=[(Ticker.HPG, 0.3)], source="VnExpress"),
+            ],
+            threshold=0.4,
+        )
+        assert [t.ticker for t in analysis.ticker_sentiments] == [
+            Ticker.VNM,
+            Ticker.HPG,
+        ]
+
+
+# --------------------------------------------------------------------------
+# Layer 3: orchestration and persistence
+# --------------------------------------------------------------------------
 
 
 class TestRunAggregate:
-    def _cluster(self, _id="evt_1", sources=None):
-        return {
-            "_id": _id,
-            "cluster_id": _id,
-            "source_breakdown": (
-                [_source(0.9, tickers=[("HPG", 0.8)])] if sources is None else sources
-            ),
-        }
+    def test_writes_and_mutates_each_cluster(self):
+        collection = FakeCollection()
+        clusters = [_cluster("evt_1"), _cluster("evt_2")]
 
-    def test_writes_aggregated_analysis_to_each_cluster(self):
-        collection = FakeCollection([self._cluster("evt_1"), self._cluster("evt_2")])
-        assert run_aggregate(collection, threshold=0.4) == 2
-        for doc in collection.docs.values():
-            (hpg,) = doc["aggregated_analysis"]["ticker_sentiments"]
-            assert hpg["score"] == pytest.approx(0.8)
+        returned = run_aggregate(clusters, collection, threshold=0.4)
+
+        assert [c.cluster_id for c in returned] == ["evt_1", "evt_2"]
+        assert set(collection.payloads) == {"evt_1", "evt_2"}
+        for cluster in returned:
+            (hpg,) = cluster.aggregated_analysis.ticker_sentiments
+            assert hpg.score == pytest.approx(0.8)
 
     def test_source_breakdown_is_not_modified(self):
-        cluster = self._cluster()
-        before = copy.deepcopy(cluster["source_breakdown"])
-        collection = FakeCollection([cluster])
-        run_aggregate(collection, threshold=0.4)
-        assert collection.docs["evt_1"]["source_breakdown"] == before
+        # Audit corrections re-derive from the raw per-source scores, so
+        # aggregation must never touch them.
+        cluster = _cluster()
+        before = cluster.model_dump()["source_breakdown"]
+        run_aggregate([cluster], FakeCollection(), threshold=0.4)
+        assert cluster.model_dump()["source_breakdown"] == before
 
-    def test_only_aggregated_analysis_is_written(self):
-        cluster = self._cluster()
-        expected_keys = set(cluster) | {"aggregated_analysis"}
-        collection = FakeCollection([cluster])
-        run_aggregate(collection, threshold=0.4)
-        assert set(collection.docs["evt_1"]) == expected_keys
+    def test_written_payload_is_bson_safe(self):
+        # model_dump(mode="json") must turn the Ticker/Concept enums into
+        # plain strings before they reach MongoDB.
+        collection = FakeCollection()
+        run_aggregate([_cluster()], collection, threshold=0.4)
+        payload = collection.payloads["evt_1"]
+        entry = payload["ticker_sentiments"][0]
+        assert entry["ticker"] == "HPG"
+        assert type(entry["ticker"]) is str
+        assert set(payload) == {"ticker_sentiments", "concept_sentiments"}
+
+    def test_null_score_survives_serialisation(self):
+        collection = FakeCollection()
+        cluster = _cluster(sources=[_source(0.1, tickers=[(Ticker.HPG, 0.8)])])
+        run_aggregate([cluster], collection, threshold=0.4)
+        payload = collection.payloads["evt_1"]
+        assert payload["ticker_sentiments"][0]["score"] is None
+
+    def test_result_round_trips_through_the_event_cluster_schema(self):
+        # The regression guard: the cluster stage re-validates persisted
+        # documents on every later run, so whatever aggregation writes must
+        # still parse back as an EventCluster.
+        cluster = _cluster(sources=[_source(0.1, tickers=[(Ticker.HPG, 0.8)])])
+        run_aggregate([cluster], FakeCollection(), threshold=0.4)
+        reloaded = EventCluster.model_validate(cluster.model_dump())
+        assert reloaded.aggregated_analysis.ticker_sentiments[0].score is None
+
+    def test_empty_input_writes_nothing(self):
+        collection = FakeCollection()
+        assert run_aggregate([], collection) == []
+        assert collection.writes == []
 
     def test_threshold_defaults_to_config_value(self, monkeypatch):
         # A 0.5-confidence source survives the real 0.4 default but must be
         # dropped once config says 0.6 — proving run_aggregate reads config.
-        cluster = self._cluster(sources=[_source(0.5, tickers=[("HPG", 0.8)])])
-        collection = FakeCollection([cluster])
+        cluster = _cluster(sources=[_source(0.5, tickers=[(Ticker.HPG, 0.8)])])
         monkeypatch.setattr(pipeline_settings, "AI_CONFIDENCE_THRESHOLD", 0.6)
-        run_aggregate(collection)
-        analysis = collection.docs["evt_1"]["aggregated_analysis"]
-        (hpg,) = analysis["ticker_sentiments"]
-        assert hpg["score"] is None
-        assert analysis["needs_review"] is True
+
+        run_aggregate([cluster], FakeCollection())
+
+        (hpg,) = cluster.aggregated_analysis.ticker_sentiments
+        assert hpg.score is None
+
+    def test_explicit_threshold_overrides_config(self, monkeypatch):
+        cluster = _cluster(sources=[_source(0.5, tickers=[(Ticker.HPG, 0.8)])])
+        monkeypatch.setattr(pipeline_settings, "AI_CONFIDENCE_THRESHOLD", 0.9)
+
+        run_aggregate([cluster], FakeCollection(), threshold=0.4)
+
+        (hpg,) = cluster.aggregated_analysis.ticker_sentiments
+        assert hpg.score == pytest.approx(0.8)
