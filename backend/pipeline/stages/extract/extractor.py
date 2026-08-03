@@ -3,6 +3,11 @@ from dataclasses import dataclass
 
 import httpx
 from google.genai.errors import APIError
+from google.api_core.exceptions import (
+    DeadlineExceeded,
+    ResourceExhausted,
+    ServiceUnavailable,
+)
 from langchain_core.exceptions import OutputParserException
 from pydantic import BaseModel, ValidationError
 
@@ -67,6 +72,10 @@ def extract_from_text(article_text: str) -> ExtractionResult:
     try:
         prompt, prompt_version = build_prompt(article_text)
         payload, model_version = invoke_llm(prompt)
+    except ResourceExhausted as exc:
+        return _failed("llm_quota_exhausted", str(exc), code=429)
+    except (DeadlineExceeded, ServiceUnavailable) as exc:
+        return _failed("llm_unavailable", str(exc))
     except httpx.TimeoutException as exc:
         return _failed("llm_timeout", str(exc))
     except APIError as exc:
