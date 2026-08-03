@@ -57,6 +57,8 @@ def _get_model() -> tuple[object, str]:
         model=model_name,
         google_api_key=pipeline_settings.LLM_API_KEY,
         temperature=pipeline_settings.EXTRACTION_TEMPERATURE,
+        max_retries=pipeline_settings.LLM_MAX_RETRIES,
+        timeout=pipeline_settings.LLM_TIMEOUT,
     )
     return model.with_structured_output(EXTRACTION_SCHEMA), model_name
 

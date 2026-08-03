@@ -145,7 +145,7 @@ def _source(
                 ConceptSentiment(concept=c, score=s) for c, s in concepts
             ],
             ai_confidence=confidence,
-            model_version="gemini-2.5-flash",
+            model_version="gemini-3.6-flash",
             prompt_version="v1",
         ),
     )
