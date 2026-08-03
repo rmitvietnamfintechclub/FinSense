@@ -3,8 +3,18 @@ from __future__ import annotations
 from fastapi import FastAPI
 
 from backend.api.features.ticker.router import router as ticker_router
+from contextlib import asynccontextmanager
+from backend.core.config import database_settings
+from backend.core.database_async import init_db, close_db
 
-app = FastAPI(title="Fin-Sense API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db(database_settings.MONGODB_URI, database_settings.MONGODB_DB_NAME)
+    yield
+    close_db()
+
+app = FastAPI(title="Fin-Sense API", lifespan=lifespan)
 
 app.include_router(ticker_router)
 

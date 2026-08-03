@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 
+import certifi
+
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 logger = logging.getLogger(__name__)
@@ -12,7 +14,7 @@ _db: AsyncIOMotorDatabase | None = None
 
 async def init_db(mongodb_uri: str, db_name: str) -> None:
     global _client, _db
-    _client = AsyncIOMotorClient(mongodb_uri)
+    _client = AsyncIOMotorClient(mongodb_uri, tz_aware=True, tlsCAFile=certifi.where())
     await _client.admin.command("ping")
     _db = _client[db_name]
     logger.info("MongoDB client initialised (db=%s)", db_name)

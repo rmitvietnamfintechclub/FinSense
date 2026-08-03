@@ -40,7 +40,11 @@ class PipelineSettings(BaseSettings):
     PROMPT_VERSION: str = "v1"
 
 class APISettings(BaseSettings):
-    pass
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    DECAY_LAMBDA: dict[str, float] = {"24h": 0.05, "48h": 0.025, "72h": 0.015} 
+    WINDOW_HOURS: dict[str, int] = {"24h": 24, "48h": 48, "72h": 72}
+    DEFAULT_WINDOW: str = "24h"
 
 
 database_settings = DatabaseSettings()
