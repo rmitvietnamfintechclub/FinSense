@@ -18,6 +18,11 @@ class PipelineSettings(BaseSettings):
     CLUSTER_SIMILARITY_THRESHOLD: float = 0.91
     CLUSTER_LOOKBACK_DAYS: int = 3
 
+    # Event Aggregation Config
+    # Sources scoring below this AI confidence are excluded from the
+    # confidence-weighted event score (numerator and denominator both).
+    AI_CONFIDENCE_THRESHOLD: float = 0.4
+
     # RSS Discovery Config
     RSS_FEEDS: list[tuple[str, str]] = [
         ("CafeF", "https://cafef.vn/thi-truong-chung-khoan.rss"),
