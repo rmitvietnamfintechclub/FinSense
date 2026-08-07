@@ -1,11 +1,3 @@
-"""
-FIN-SENSE 2.0 — MongoDB initialisation script
-Run once to create collections, indexes, and seed static_ontology + concept_dictionary.
-Usage: MONGODB_URI=... python backend/scripts/init_db.py
-"""
-
-from datetime import datetime, timezone
-
 import certifi
 from pymongo import ASCENDING, DESCENDING, MongoClient
 from pymongo.errors import CollectionInvalid
@@ -34,7 +26,6 @@ def setup_collections():
         "event_clusters",
         "daily_sentiment_history",
         "static_ontology",
-        "concept_dictionary",
         "audit_log",
         "frozen_test_set",
     ]:
@@ -73,11 +64,6 @@ def setup_indexes():
     db.static_ontology.create_index("ticker", unique=True, name="ticker_unique")
     print("  static_ontology: done")
 
-    # concept_dictionary
-    db.concept_dictionary.create_index("concept", unique=True, name="concept_unique")
-    db.concept_dictionary.create_index("aliases", name="aliases_multikey")
-    print("  concept_dictionary: done")
-
     # audit_log
     db.audit_log.create_index("cluster_id", name="cluster_id")
     db.audit_log.create_index([("performed_at", DESCENDING)], name="performed_at_desc")
@@ -89,72 +75,9 @@ def setup_indexes():
     print("  frozen_test_set: done")
 
 
-def seed_static_ontology():
-    """
-    Ticker → concept weight map for S_final calculation.
-    PLACEHOLDER weights — mandatory human review required before production.
-    """
-    print("\nSeeding static_ontology...")
-
-    tickers = [
-        {
-            "ticker": "HPG",
-            "concept_weights": [
-                {"concept": "STEEL", "weight": 1.0},
-                {"concept": "CONSTRUCTION_MATERIALS", "weight": 0.5},
-                {"concept": "MACRO", "weight": 0.3},
-            ],
-        },
-        {
-            "ticker": "VCB",
-            "concept_weights": [
-                {"concept": "BANKING", "weight": 1.0},
-                {"concept": "MONETARY_POLICY", "weight": 0.8},
-                {"concept": "MACRO", "weight": 0.3},
-            ],
-        },
-        {
-            "ticker": "VIC",
-            "concept_weights": [
-                {"concept": "REAL_ESTATE", "weight": 1.0},
-                {"concept": "RETAIL", "weight": 0.4},
-                {"concept": "MACRO", "weight": 0.2},
-            ],
-        },
-        {
-            "ticker": "GAS",
-            "concept_weights": [
-                {"concept": "OIL_GAS", "weight": 1.0},
-                {"concept": "MACRO", "weight": 0.3},
-            ],
-        },
-        {
-            "ticker": "SSI",
-            "concept_weights": [
-                {"concept": "SECURITIES", "weight": 1.0},
-                {"concept": "MACRO", "weight": 0.4},
-            ],
-        },
-    ]
-
-    for t in tickers:
-        t["created_at"] = datetime.now(timezone.utc)
-        db.static_ontology.update_one(
-            {"ticker": t["ticker"]},
-            {"$setOnInsert": t},
-            upsert=True,
-        )
-        print(f"  Seeded: {t['ticker']}")
-
-    print("  WARNING: concept_weights are PLACEHOLDERS.")
-    print("  Mandatory human review required before production deployment.")
-
-
-
 if __name__ == "__main__":
     print(f"Connecting to database: {DB_NAME}")
     setup_collections()
     setup_indexes()
-    seed_static_ontology()
     print("\nDone. Verify in Atlas UI → Browse Collections.")
     client.close()

@@ -40,12 +40,6 @@ def update_centroid(
     article_count: int,
     new_embedding: ArrayLike,
 ) -> NDArray[np.floating]:
-    """Add one embedding to a centroid without retaining old embeddings.
-
-    ``old + (new - old) / (n + 1)`` is algebraically identical to
-    ``(n * old + new) / (n + 1)`` and avoids a potentially large
-    intermediate multiplication.
-    """
     if isinstance(article_count, bool) or not isinstance(article_count, Integral):
         raise TypeError("article_count must be an integer")
     if article_count < 1:
