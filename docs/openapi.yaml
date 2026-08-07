@@ -239,6 +239,9 @@ paths:
           schema:
             type: string
             enum: [CafeF, VnExpress]
+          description: >
+            Matches backend.core.config.pipeline_settings.RSS_FEEDS — update this
+            enum if a source is added or removed there.
       requestBody:
         required: true
         content:
@@ -330,8 +333,8 @@ components:
       in: path
       required: true
       schema:
-        type: string
-        example: HPG
+        $ref: '#/components/schemas/Ticker'
+      example: HPG
       description: Ticker symbol (uppercase)
 
     cluster_id:
@@ -392,6 +395,61 @@ components:
       nullable: true
       description: Continuous sentiment score. null means no valid events in window.
 
+    # Frozen vocabularies — kept in sync by hand with backend/core/enums.py.
+    # These are closed sets on purpose: historical sentiment records are labeled
+    # against this exact vocabulary. Do not add/remove values here without a
+    # corresponding backend enum change (and re-running the frozen test set).
+
+    Ticker:
+      type: string
+      description: VN30 ticker symbol. Mirrors backend/core/enums.py::Ticker.
+      enum:
+        - ACB
+        - BID
+        - BSR
+        - CTG
+        - FPT
+        - GAS
+        - GVR
+        - HDB
+        - HPG
+        - LPB
+        - MBB
+        - MCH
+        - MSN
+        - MWG
+        - SAB
+        - SHB
+        - SSB
+        - SSI
+        - STB
+        - TCB
+        - TCX
+        - VCB
+        - VHM
+        - VIB
+        - VIC
+        - VJC
+        - VNM
+        - VPB
+        - VPL
+        - VRE
+
+    Concept:
+      type: string
+      description: Macro/sector concept taxonomy. Mirrors backend/core/enums.py::Concept.
+      enum:
+        - BANKING
+        - CONSUMER_DISCRETIONARY
+        - CONSUMER_STAPLES
+        - ENERGY
+        - INDUSTRIALS
+        - MACRO
+        - MATERIALS
+        - REAL_ESTATE
+        - SECURITIES
+        - TECHNOLOGY
+
     # ── Dashboard ──
 
     DashboardOverview:
@@ -444,11 +502,14 @@ components:
         rank:
           type: integer
         ticker:
-          type: string
-          example: HPG
+          $ref: '#/components/schemas/Ticker'
         company_name:
           type: string
           example: Hoa Phat Group
+          description: >
+            TODO: no ticker → company-name mapping currently exists in the
+            backend (backend/core/enums.py only defines symbols). Source this
+            before implementing the endpoint, or drop the field.
         event_count:
           type: integer
         sentiment_score:
@@ -467,6 +528,10 @@ components:
           type: integer
         sources:
           type: object
+          description: >
+            Keyed by source name. Currently CafeF and VnExpress (see
+            backend/core/config.py::PipelineSettings.RSS_FEEDS) — add a source
+            here if a new one is registered in the scraper.
           properties:
             CafeF:
               type: integer
@@ -475,7 +540,7 @@ components:
         tickers:
           type: array
           items:
-            type: string
+            $ref: '#/components/schemas/Ticker'
 
     # ── Ticker Detail ──
 
@@ -483,9 +548,10 @@ components:
       type: object
       properties:
         ticker:
-          type: string
+          $ref: '#/components/schemas/Ticker'
         company_name:
           type: string
+          description: "TODO: see TickerFeedItem.company_name — same unresolved data source."
         window:
           type: string
         sentiment_score:
@@ -509,7 +575,7 @@ components:
       type: object
       properties:
         ticker:
-          type: string
+          $ref: '#/components/schemas/Ticker'
         days:
           type: integer
         data:
@@ -531,7 +597,7 @@ components:
       type: object
       properties:
         ticker:
-          type: string
+          $ref: '#/components/schemas/Ticker'
         window:
           type: string
         page:
@@ -589,7 +655,7 @@ components:
             type: object
             properties:
               ticker:
-                type: string
+                $ref: '#/components/schemas/Ticker'
               score:
                 $ref: '#/components/schemas/SentimentScore'
         corrected_concept_sentiments:
@@ -600,7 +666,7 @@ components:
             type: object
             properties:
               concept:
-                type: string
+                $ref: '#/components/schemas/Concept'
               score:
                 $ref: '#/components/schemas/SentimentScore'
 
@@ -642,7 +708,7 @@ components:
                         type: object
                         properties:
                           ticker:
-                            type: string
+                            $ref: '#/components/schemas/Ticker'
                           score:
                             $ref: '#/components/schemas/SentimentScore'
                     concept_sentiments:
@@ -651,7 +717,7 @@ components:
                         type: object
                         properties:
                           concept:
-                            type: string
+                            $ref: '#/components/schemas/Concept'
                           score:
                             $ref: '#/components/schemas/SentimentScore'
 
@@ -686,7 +752,7 @@ components:
                   type: object
                   properties:
                     ticker:
-                      type: string
+                      $ref: '#/components/schemas/Ticker'
                     score:
                       $ref: '#/components/schemas/SentimentScore'
               new_ticker_sentiments:
@@ -696,7 +762,7 @@ components:
                   type: object
                   properties:
                     ticker:
-                      type: string
+                      $ref: '#/components/schemas/Ticker'
                     score:
                       $ref: '#/components/schemas/SentimentScore'
               old_concept_sentiments:
@@ -705,7 +771,7 @@ components:
                   type: object
                   properties:
                     concept:
-                      type: string
+                      $ref: '#/components/schemas/Concept'
                     score:
                       $ref: '#/components/schemas/SentimentScore'
               new_concept_sentiments:
@@ -715,7 +781,7 @@ components:
                   type: object
                   properties:
                     concept:
-                      type: string
+                      $ref: '#/components/schemas/Concept'
                     score:
                       $ref: '#/components/schemas/SentimentScore'
               performed_at:
