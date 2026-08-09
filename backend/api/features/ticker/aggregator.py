@@ -5,7 +5,6 @@ from datetime import UTC, datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorCollection
 
 from backend.core.config import APISettings, api_settings
-from backend.core.database_async import get_db
 from backend.core.formulas import (
     SFinalResult,
     blend_s_final,

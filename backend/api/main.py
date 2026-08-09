@@ -20,6 +20,7 @@ app = FastAPI(title="Fin-Sense API", lifespan=lifespan)
 app.include_router(ticker_router)
 
 from backend.api.features.dashboard.router import router as dashboard_router
+
 # from backend.api.features.events.router import router as events_router
 # from backend.api.features.history.router import router as history_router
 # from backend.api.features.audit.router import router as audit_router

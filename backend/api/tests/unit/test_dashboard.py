@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -70,7 +70,7 @@ class TestGetSummary:
         assert result.total_tickers == svc.TOTAL_TICKERS
 
     def test_last_updated_reflects_most_recent_event(self):
-        latest = datetime(2026, 7, 30, 10, 0, tzinfo=timezone.utc)
+        latest = datetime(2026, 7, 30, 10, 0, tzinfo=UTC)
         fake_db = {
             "articles": MagicMock(count_documents=MagicMock(return_value=5)),
             "event_clusters": MagicMock(
@@ -104,7 +104,7 @@ class TestGetGauge:
     def test_score_reflects_only_selected_window(self):
         """Acceptance criteria FS-23: 'Score reflects only the selected
         window' — event ngoai window khong duoc dua vao tinh toan."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         events_in_window = [
             {
                 "created_at": now - timedelta(hours=1),
@@ -126,7 +126,7 @@ class TestGetGauge:
         assert result.market_score == pytest.approx(0.9, abs=0.01)
 
     def test_buckets_count_correctly(self):
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         events = [
             {
                 "created_at": now - timedelta(hours=1),
@@ -161,7 +161,7 @@ class TestGetGauge:
         """Event co the ton tai nhung khong co entry nao co score (vd
         toan bo bi null hoa do fail confidence) — khong duoc crash,
         chi bi bo qua khoi tinh toan."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         events = [
             {
                 "created_at": now - timedelta(hours=1),

@@ -6,7 +6,6 @@ backend/api/features/dashboard/schemas.py (bo sung FS-23, FS-24, FS-25)
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -17,7 +16,7 @@ class SummaryResponse(BaseModel):
     )
     total_articles: int = Field(..., description="Tong so document trong articles")
     total_events: int = Field(..., description="Tong so document trong event_clusters")
-    last_updated: Optional[datetime] = Field(
+    last_updated: datetime | None = Field(
         ...,
         description=(
             "Thoi diem event_clusters.updated_at moi nhat toan he thong. "

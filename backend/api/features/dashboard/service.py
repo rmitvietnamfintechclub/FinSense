@@ -5,13 +5,21 @@ from datetime import UTC, datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from backend.api.features.dashboard.schemas import (
-    EventItem, EventsResponse, GaugeResponse,
-    SummaryResponse, TickerItem, TickersResponse,
+    EventItem,
+    EventsResponse,
+    GaugeResponse,
+    SummaryResponse,
+    TickerItem,
+    TickersResponse,
 )
 from backend.api.features.ticker.aggregator import assemble_live_sentiment
 from backend.core.config import APISettings, api_settings
 from backend.core.enums import Ticker
-from backend.core.formulas import bucket_sentiment, recency_weight, time_weighted_average
+from backend.core.formulas import (
+    bucket_sentiment,
+    recency_weight,
+    time_weighted_average,
+)
 from backend.core.lexicon import get_concept_weights
 
 EVENT_CLUSTERS_COLLECTION = "event_clusters"

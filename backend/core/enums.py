@@ -1,4 +1,4 @@
-from backend.core._compat import StrEnum
+from enum import StrEnum
 
 class Ticker(StrEnum):
     ACB = "ACB"
