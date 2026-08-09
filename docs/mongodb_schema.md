@@ -65,11 +65,12 @@ Core collection. One document per event. Written by pipeline, read by serving AP
 
   "aggregated_analysis": {
     "ticker_sentiments": [
-      { "ticker": "string — e.g. 'HPG'", "score": "float [-1.0, 1.0]" }
+      { "ticker": "string — e.g. 'HPG'", "score": "float [-1.0, 1.0] | null — null = no source at/above AI_CONFIDENCE_THRESHOLD mentioned it ('no confident read', distinct from a neutral 0)" }
     ],
     "concept_sentiments": [
-      { "concept": "string — canonical enum e.g. 'STEEL'", "score": "float [-1.0, 1.0]" }
+      { "concept": "string — canonical enum e.g. 'STEEL'", "score": "float [-1.0, 1.0] | null — same null semantics as ticker_sentiments" }
     ],
+    "needs_review": "boolean — true when no source in the cluster meets AI_CONFIDENCE_THRESHOLD; surfaces the event for human review"
   },
 
   "source_breakdown": [
@@ -90,6 +91,7 @@ Core collection. One document per event. Written by pipeline, read by serving AP
         ],
         "ai_confidence": "float [0.0, 1.0]",
         "model_version": "string — e.g. 'gemini-1.5-flash'",
+        "prompt_version": "string - e.g. 'v1'",
       },
       "is_audited": "boolean — false until admin approves or corrects",
     }

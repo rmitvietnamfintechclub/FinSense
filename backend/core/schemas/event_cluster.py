@@ -6,22 +6,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-
-class TickerSentiment(BaseModel):
-    ticker: str
-    score: float = Field(ge=-1.0, le=1.0)
-
-
-class ConceptSentiment(BaseModel):
-    concept: str
-    score: float = Field(ge=-1.0, le=1.0)
-
-
-class AIResponse(BaseModel):
-    ticker_sentiments: list[TickerSentiment] = Field(default_factory=list)
-    concept_sentiments: list[ConceptSentiment] = Field(default_factory=list)
-    ai_confidence: float = Field(ge=0.0, le=1.0)
-    model_version: str
+from backend.core.schemas.sentiment import AggregatedAnalysis, AIResponse
 
 
 class RepresentativeArticle(BaseModel):
@@ -44,11 +29,6 @@ class SourceBreakdown(BaseModel):
 class EventCoverage(BaseModel):
     total_articles: int
     all_urls: dict[str, list[str]] = Field(default_factory=dict)
-
-
-class AggregatedAnalysis(BaseModel):
-    ticker_sentiments: list[TickerSentiment] = Field(default_factory=list)
-    concept_sentiments: list[ConceptSentiment] = Field(default_factory=list)
 
 
 class EventCluster(BaseModel):
