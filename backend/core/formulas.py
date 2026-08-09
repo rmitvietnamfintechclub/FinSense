@@ -98,3 +98,11 @@ def confidence_weighted_avg(
         return None
 
     return weighted_sum / weight_total
+
+
+def bucket_sentiment(score: float, threshold: float) -> str:
+    if score > threshold:
+        return "positive"
+    if score < -threshold:
+        return "negative"
+    return "neutral"

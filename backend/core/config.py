@@ -50,6 +50,11 @@ class APISettings(BaseSettings):
     WINDOW_HOURS: dict[str, int] = {"24h": 24, "48h": 48, "72h": 72}
     DEFAULT_WINDOW: str = "24h"
 
+    # Dashboard
+    DEFAULT_EVENTS_LIMIT = 5
+    DEFAULT_TICKERS_LIMIT = 5
+    SENTIMENT_BUCKET_THRESHOLD = 0.2
+
 
 database_settings = DatabaseSettings()
 pipeline_settings = PipelineSettings()

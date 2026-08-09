@@ -14,7 +14,6 @@ from backend.core.formulas import (
 )
 from backend.core.lexicon import get_concept_weights
 
-EVENT_CLUSTERS_COLLECTION = "event_clusters"
 
 # Fetch relevant clusters of the specified ticker
 async def _fetch_events(ticker: str, concepts: list[str], window_start: datetime, events_collection: AsyncIOMotorCollection) -> list[dict]:
@@ -65,6 +64,7 @@ def assemble_live_sentiment(
 
 
 async def compute_live_sentiment(
+    events_collection: AsyncIOMotorCollection,
     ticker: str,
     window: str,
     settings: APISettings = api_settings,
@@ -74,9 +74,6 @@ async def compute_live_sentiment(
     window_start = now - timedelta(hours=window_hours)
 
     lambda_ = settings.DECAY_LAMBDA[window] 
-
-    db = get_db()
-    events_collection = db[EVENT_CLUSTERS_COLLECTION]
 
     concept_weights = get_concept_weights(ticker)
     relevant_concepts = list(concept_weights.keys())
