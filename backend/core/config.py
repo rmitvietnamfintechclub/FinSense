@@ -36,19 +36,19 @@ class PipelineSettings(BaseSettings):
     # LLM Settings
     LLM_API_KEY: str = ""
     LLM_MODEL_NAME: str = "gemini-2.5-flash"
+    LLM_TIMEOUT: int = 60          # seconds, per request
+    LLM_MAX_RETRIES: int = 1 
     EXTRACTION_TEMPERATURE: float = 0.0
     PROMPT_VERSION: str = "v1"
+
+    AI_CONFIDENCE_THRESHOLD: float = 0.4
 
 class APISettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
-    DECAY_LAMBDA: dict[str, float] = {
-        "24h": 0.192,
-        "48h": 0.096,
-        "72h": 0.064,
-    }
-    CONFIDENCE_THRESHOLD: float = 0.4
-    SENTIMENT_BUCKET_THRESHOLD: float = 0.2
+    DECAY_LAMBDA: dict[str, float] = {"24h": 0.05, "48h": 0.025, "72h": 0.015} 
+    WINDOW_HOURS: dict[str, int] = {"24h": 24, "48h": 48, "72h": 72}
+    DEFAULT_WINDOW: str = "24h"
 
 
 database_settings = DatabaseSettings()

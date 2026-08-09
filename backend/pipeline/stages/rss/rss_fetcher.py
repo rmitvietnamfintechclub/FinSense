@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import logging
 from calendar import timegm
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import feedparser
 import requests
@@ -31,7 +31,7 @@ def _to_datetime(parsed_time) -> datetime | None:
     """Convert feedparser's struct_time (already UTC) to an aware datetime."""
     if not parsed_time:
         return None
-    return datetime.fromtimestamp(timegm(parsed_time), tz=timezone.utc)
+    return datetime.fromtimestamp(timegm(parsed_time), tz=UTC)
 
 
 def _entry_to_article(entry, source: str) -> Article | None:

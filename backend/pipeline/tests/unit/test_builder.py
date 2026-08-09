@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import mongomock
 import numpy as np
@@ -24,7 +24,7 @@ from backend.pipeline.stages.cluster.stage import (
 
 
 def _article(
-    title: str, url: str, source: str, published_at: datetime = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    title: str, url: str, source: str, published_at: datetime = datetime(2026, 1, 1, tzinfo=UTC)
 ) -> Article:
     return Article(
         title=title,
@@ -72,7 +72,7 @@ def test_select_source_representatives_keeps_closer_existing():
     existing = {
         "CafeF": RepresentativeArticle(
             url="http://a/old",
-            published_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            published_at=datetime(2026, 1, 1, tzinfo=UTC),
             content_fed_to_ai="old content",
             centroid_similarity=0.95,
         )
@@ -92,7 +92,7 @@ def test_select_source_representatives_replaces_when_closer():
     existing = {
         "CafeF": RepresentativeArticle(
             url="http://a/old",
-            published_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            published_at=datetime(2026, 1, 1, tzinfo=UTC),
             content_fed_to_ai="old content",
             centroid_similarity=0.5,
         )
@@ -246,7 +246,7 @@ def test_upsert_event_cluster_round_trip_grows_coverage():
 
 def test_load_existing_clusters_filters_by_lookback():
     collection = _collection()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     collection.insert_one(
         {
             "cluster_id": "recent",
@@ -332,8 +332,8 @@ def test_run_cluster_skips_untouched_existing_clusters(monkeypatch):
         {
             "cluster_id": "evt_old",
             "event_title": "Old event",
-            "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
+            "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+            "updated_at": datetime.now(UTC),
             "centroid_embedding": [0.0, 1.0],
             "event_coverage": {
                 "total_articles": 1,
@@ -390,8 +390,8 @@ def test_run_cluster_new_cluster_never_collides_with_aged_out_cluster(monkeypatc
         {
             "cluster_id": "cluster_1",
             "event_title": "Old unrelated event",
-            "created_at": datetime(2026, 1, 1, tzinfo=timezone.utc),
-            "updated_at": datetime.now(timezone.utc) - timedelta(days=10),
+            "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+            "updated_at": datetime.now(UTC) - timedelta(days=10),
             "centroid_embedding": [0.0, 1.0],
             "event_coverage": {
                 "total_articles": 1,
