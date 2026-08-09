@@ -1,6 +1,5 @@
 from enum import StrEnum
 
-
 class Ticker(StrEnum):
     ACB = "ACB"
     BID = "BID"
