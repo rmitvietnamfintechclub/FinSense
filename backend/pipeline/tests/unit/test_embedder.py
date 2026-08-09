@@ -1,6 +1,6 @@
 """Unit tests for the cluster-stage embedder."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 
@@ -14,7 +14,7 @@ def _article(title: str, summary: str = "") -> Article:
         summary=summary,
         url="http://example.com",
         source="Test",
-        published_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        published_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 
 

@@ -1,17 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
-from backend.core.config import APISettings, api_settings
-from backend.core.database_async import get_db
-from backend.core.formulas import blend_s_final, recency_weight, time_weighted_average, SFinalResult
-from backend.core.lexicon import get_concept_weights
+from datetime import UTC, datetime, timedelta
 
 from motor.motor_asyncio import AsyncIOMotorCollection
 
+from backend.core.config import APISettings, api_settings
+from backend.core.database_async import get_db
+from backend.core.formulas import (
+    SFinalResult,
+    blend_s_final,
+    recency_weight,
+    time_weighted_average,
+)
+from backend.core.lexicon import get_concept_weights
 
 EVENT_CLUSTERS_COLLECTION = "event_clusters"
 
+# Fetch relevant clusters of the specified ticker
 async def _fetch_events(ticker: str, concepts: list[str], window_start: datetime, events_collection: AsyncIOMotorCollection) -> list[dict]:
     cursor = events_collection.find(
         {
@@ -64,7 +69,7 @@ async def compute_live_sentiment(
     window: str,
     settings: APISettings = api_settings,
 ):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     window_hours = settings.WINDOW_HOURS[window]
     window_start = now - timedelta(hours=window_hours)
 

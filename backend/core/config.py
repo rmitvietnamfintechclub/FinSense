@@ -36,8 +36,12 @@ class PipelineSettings(BaseSettings):
     # LLM Settings
     LLM_API_KEY: str = ""
     LLM_MODEL_NAME: str = "gemini-2.5-flash"
+    LLM_TIMEOUT: int = 60          # seconds, per request
+    LLM_MAX_RETRIES: int = 1 
     EXTRACTION_TEMPERATURE: float = 0.0
     PROMPT_VERSION: str = "v1"
+
+    AI_CONFIDENCE_THRESHOLD: float = 0.4
 
 class APISettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

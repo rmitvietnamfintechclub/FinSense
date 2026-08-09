@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import uuid
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 from numpy.typing import NDArray
@@ -152,7 +152,7 @@ def build_event_cluster(
             else _pick_event_title(articles, embeddings, cluster)
         )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return EventCluster(
         cluster_id=cluster.cluster_id,
         event_title=event_title,
@@ -222,7 +222,7 @@ def load_existing_clusters(
     if lookback is None:
         lookback = timedelta(days=pipeline_settings.CLUSTER_LOOKBACK_DAYS)
 
-    cutoff = datetime.now(timezone.utc) - lookback
+    cutoff = datetime.now(UTC) - lookback
     return list(
         collection.find(
             {"updated_at": {"$gte": cutoff}},

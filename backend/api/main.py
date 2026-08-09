@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
 from backend.api.features.ticker.router import router as ticker_router
-from contextlib import asynccontextmanager
 from backend.core.config import database_settings
-from backend.core.database_async import init_db, close_db
+from backend.core.database_async import close_db, init_db
 
 
 @asynccontextmanager

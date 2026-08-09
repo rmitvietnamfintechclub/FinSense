@@ -12,12 +12,10 @@ import pytest
 
 from backend.core.formulas import (
     W_TICKER,
-    SFinalResult,
     blend_s_final,
     recency_weight,
     time_weighted_average,
 )
-
 
 # ============================================================
 # recency_weight

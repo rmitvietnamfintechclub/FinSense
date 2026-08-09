@@ -20,6 +20,16 @@ class AIResponse(BaseModel):
     prompt_version: str
 
 
+class AggregatedTickerSentiment(BaseModel):
+    ticker: Ticker
+    score: float | None = Field(default=None, ge=-1.0, le=1.0)
+
+
+class AggregatedConceptSentiment(BaseModel):
+    concept: Concept
+    score: float | None = Field(default=None, ge=-1.0, le=1.0)
+
+
 class AggregatedAnalysis(BaseModel):
-    ticker_sentiments: list[TickerSentiment] = Field(default_factory=list)
-    concept_sentiments: list[ConceptSentiment] = Field(default_factory=list)
+    ticker_sentiments: list[AggregatedTickerSentiment] = Field(default_factory=list)
+    concept_sentiments: list[AggregatedConceptSentiment] = Field(default_factory=list)

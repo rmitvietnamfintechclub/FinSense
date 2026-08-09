@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 
 import certifi
-
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 
 logger = logging.getLogger(__name__)
