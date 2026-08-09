@@ -7,7 +7,6 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from backend.core.enums import Concept, Ticker
 
-
 STATIC_ONTOLOGY_PATH = REPO_ROOT / "backend" / "pipeline" / "lexicon" / "static_ontology.json"
 
 

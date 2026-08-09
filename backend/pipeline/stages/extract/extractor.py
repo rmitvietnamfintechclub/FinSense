@@ -2,12 +2,12 @@ import logging
 from dataclasses import dataclass
 
 import httpx
-from google.genai.errors import APIError
 from google.api_core.exceptions import (
     DeadlineExceeded,
     ResourceExhausted,
     ServiceUnavailable,
 )
+from google.genai.errors import APIError
 from langchain_core.exceptions import OutputParserException
 from pydantic import BaseModel, ValidationError
 

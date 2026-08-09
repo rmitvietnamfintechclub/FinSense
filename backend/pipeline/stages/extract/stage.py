@@ -3,6 +3,7 @@ import logging
 from pymongo import UpdateOne
 from pymongo.collection import Collection
 
+from backend.core.database import get_database
 from backend.core.schemas.event_cluster import EventCluster
 from backend.pipeline.stages.extract.extractor import extract_from_text
 

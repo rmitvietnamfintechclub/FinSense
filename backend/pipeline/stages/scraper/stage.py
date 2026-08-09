@@ -3,8 +3,8 @@ import logging
 from pymongo import UpdateOne
 from pymongo.collection import Collection
 
-from backend.core.schemas.event_cluster import EventCluster
 from backend.core.database import get_database
+from backend.core.schemas.event_cluster import EventCluster
 from backend.pipeline.stages.scraper.source_client import fetch_body
 
 logger = logging.getLogger(__name__)

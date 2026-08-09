@@ -8,7 +8,7 @@ Three layers, deliberately separated:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -136,7 +136,7 @@ def _source(
         source=source,
         representative_article=RepresentativeArticle(
             url=f"https://{source.lower()}.vn/{confidence}",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             centroid_similarity=0.95,
         ),
         ai_response=AIResponse(
@@ -157,7 +157,7 @@ def _unextracted_source(source: str = "CafeF") -> SourceBreakdown:
         source=source,
         representative_article=RepresentativeArticle(
             url=f"https://{source.lower()}.vn/pending",
-            published_at=datetime.now(timezone.utc),
+            published_at=datetime.now(UTC),
             centroid_similarity=0.95,
         ),
         ai_response=None,
@@ -165,7 +165,7 @@ def _unextracted_source(source: str = "CafeF") -> SourceBreakdown:
 
 
 def _cluster(cluster_id: str = "evt_1", sources=None) -> EventCluster:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return EventCluster(
         cluster_id=cluster_id,
         event_title="HPG announces Q3 results",
