@@ -13,8 +13,8 @@ def load_static_ontology() -> dict[str, dict[str, float]]:
     """ticker -> {concept: weight}, read once per process."""
     entries = json.loads(_ONTOLOGY_PATH.read_text(encoding="utf-8"))
     return {
-        e["ticker"]: {cw["concept"]: cw["weight"] for cw in e["concept_weights"]}
-        for e in entries
+        ticker: {cw["concept"]: cw["weight"] for cw in entries[ticker]}
+        for ticker in entries
     }
 
 

@@ -20,13 +20,13 @@ EVENT_CLUSTERS_COLLECTION = "event_clusters"
 async def _fetch_events(ticker: str, concepts: list[str], window_start: datetime, events_collection: AsyncIOMotorCollection) -> list[dict]:
     cursor = events_collection.find(
         {
-            "created_at": {"$gte": window_start},
+            "updated_at": {"$gte": window_start},
             "$or": [
                 {"aggregated_analysis.ticker_sentiments.ticker": ticker},
                 {"aggregated_analysis.concept_sentiments.concept": {"$in": concepts}},
             ],
         },
-        projection={"created_at": 1, "aggregated_analysis": 1},
+        projection={"updated_at": 1, "aggregated_analysis": 1},
     )
     return await cursor.to_list(length=None)
 
@@ -42,7 +42,7 @@ def assemble_live_sentiment(
     concept_scored_weights: dict[str, list[tuple[float, float]]] = {c: [] for c in concept_weights}   
 
     for event in events:
-        age_hours = (now - event["created_at"]).total_seconds() / 3600
+        age_hours = (now - event["updated_at"]).total_seconds() / 3600
         w_time = recency_weight(age_hours, lambda_)
 
         analysis = event.get("aggregated_analysis") or {}
