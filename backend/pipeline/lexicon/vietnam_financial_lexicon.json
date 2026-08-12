@@ -1,0 +1,206 @@
+{
+  "sentiment_terms": {
+    "điều chỉnh giảm": {
+      "meaning_en": "adjusted downward",
+      "sentiment_range": [-0.6, -0.3],
+      "note": "Reads as a neutral technical/accounting phrase, but reports a price or profit decline; treat as negative coverage, not neutral."
+    },
+    "trích lập dự phòng": {
+      "meaning_en": "set aside (loan-loss) provisions",
+      "sentiment_range": [-0.5, -0.2],
+      "note": "Standard, prudent accounting term on its surface, but in news coverage it signals rising bad-debt risk at a bank; framing is negative."
+    },
+    "tái cơ cấu nợ": {
+      "meaning_en": "debt restructuring",
+      "sentiment_range": [-0.5, -0.2],
+      "note": "Sounds like a routine corporate/procedural action, but in Vietnamese financial press it almost always signals repayment distress."
+    },
+    "nợ xấu": {
+      "meaning_en": "bad debt / non-performing loan",
+      "sentiment_range": [-0.7, -0.4],
+      "note": "Direct negative signal about asset quality; not ambiguous, but must be recognized to avoid a missed/neutral read."
+    },
+    "cảnh báo lợi nhuận": {
+      "meaning_en": "profit warning",
+      "sentiment_range": [-0.7, -0.4],
+      "note": "A company or analyst pre-announcing weaker results; unambiguously negative for the ticker."
+    },
+    "kiểm soát đặc biệt": {
+      "meaning_en": "placed under special (regulatory) control",
+      "sentiment_range": [-1.0, -0.7],
+      "note": "Regulatory/administrative-sounding phrase, but denotes a bank in severe financial distress under central-bank supervision; strongly negative."
+    },
+    "âm vốn chủ sở hữu": {
+      "meaning_en": "negative equity",
+      "sentiment_range": [-0.9, -0.6],
+      "note": "Technical balance-sheet term; liabilities exceed assets, a severe solvency red flag."
+    },
+    "chậm thanh toán lãi/gốc trái phiếu": {
+      "meaning_en": "late payment of bond interest or principal",
+      "sentiment_range": [-0.9, -0.6],
+      "note": "Administrative phrasing, but signals imminent bond default risk; strongly negative for the issuer."
+    },
+    "vỡ nợ": {
+      "meaning_en": "default",
+      "sentiment_range": [-1.0, -0.7],
+      "note": "Unambiguously severe negative event; include so the model does not under-weight it as a generic financial term."
+    },
+    "giải chấp": {
+      "meaning_en": "forced liquidation / margin call sell-off",
+      "sentiment_range": [-0.8, -0.5],
+      "note": "Technical brokerage term for forced selling of collateralized shares; consistently negative, not a routine trade."
+    },
+    "hủy niêm yết": {
+      "meaning_en": "delisting",
+      "sentiment_range": [-0.9, -0.6],
+      "note": "Strongly negative for the ticker regardless of the stated reason (voluntary delisting is rare and still market-negative in VN coverage)."
+    },
+    "phá đáy": {
+      "meaning_en": "break through the bottom (new low)",
+      "sentiment_range": [-0.8, -0.5],
+      "note": "Idiomatic price-action phrase; 'đáy' (bottom) alone is neutral, but 'phá đáy' specifically means setting a new low, i.e. negative."
+    },
+    "giảm sàn": {
+      "meaning_en": "hit limit-down (price floor)",
+      "sentiment_range": [-1.0, -0.8],
+      "note": "Exchange-mechanics term ('sàn' = floor); without knowing VN trading-band rules this reads as neutral, but it is the most severe single-day negative move possible."
+    },
+    "khối ngoại bán ròng": {
+      "meaning_en": "foreign investors net sell",
+      "sentiment_range": [-0.5, -0.2],
+      "note": "Requires knowing 'ròng' = net; sustained foreign net selling is a bearish sentiment signal in VN market coverage."
+    },
+    "kín room ngoại": {
+      "meaning_en": "foreign ownership room fully used",
+      "sentiment_range": [0.4, 0.7],
+      "note": "Reads as a neutral administrative/limit statement ('room' = ownership cap), but it signals strong foreign investor demand; positive."
+    },
+    "tăng trần": {
+      "meaning_en": "hit limit-up (price ceiling)",
+      "sentiment_range": [0.8, 1.0],
+      "note": "Exchange-mechanics term ('trần' = ceiling); the strongest single-day positive move possible under VN trading-band rules."
+    },
+    "phá đỉnh": {
+      "meaning_en": "break through the peak (new high / all-time high)",
+      "sentiment_range": [0.7, 1.0],
+      "note": "Mirror of 'phá đáy'; 'đỉnh' (peak) alone is neutral, but 'phá đỉnh' specifically means setting a new high, i.e. strongly positive."
+    },
+    "cháy hàng": {
+      "meaning_en": "sold out (lit. 'goods on fire')",
+      "sentiment_range": [0.5, 0.8],
+      "note": "Colloquial expression, easy to miss as idiomatic; used in coverage of IPOs/offerings to mean overwhelming demand, i.e. positive."
+    },
+    "bắt đáy": {
+      "meaning_en": "bottom-fishing (buying at a perceived low)",
+      "sentiment_range": [0.3, 0.6],
+      "note": "Mentions a low price, which could be misread as negative, but it describes bullish buying interest/confidence; treat as positive."
+    },
+    "tăng trưởng nóng": {
+      "meaning_en": "hot growth / overheating growth",
+      "sentiment_range": [-0.2, 0.3],
+      "note": "Sounds purely positive at face value ('tăng trưởng' = growth), but VN financial press typically pairs it with an overheating/unsustainable-risk connotation; treat as mixed/mildly cautionary, not strongly positive."
+    }
+  },
+  "abbreviations": {
+    "HĐQT": {
+      "expansion_vi": "Hội đồng quản trị",
+      "meaning_en": "Board of Directors",
+      "note": "Very high-frequency in corporate news; core to identifying who made a statement or decision."
+    },
+    "ĐHĐCĐ": {
+      "expansion_vi": "Đại hội đồng cổ đông",
+      "meaning_en": "General Meeting of Shareholders",
+      "note": "Frequently appears in headlines about resolutions/dividends; distinct from HĐQT (the board)."
+    },
+    "BCTC": {
+      "expansion_vi": "Báo cáo tài chính",
+      "meaning_en": "Financial statement",
+      "note": "Ubiquitous in earnings coverage; needed to correctly scope claims as coming from an official financial report."
+    },
+    "NHNN": {
+      "expansion_vi": "Ngân hàng Nhà nước",
+      "meaning_en": "State Bank of Vietnam (central bank)",
+      "note": "Macro/policy-relevant actor; must not be confused with a commercial bank ticker."
+    },
+    "UBCKNN": {
+      "expansion_vi": "Ủy ban Chứng khoán Nhà nước",
+      "meaning_en": "State Securities Commission of Vietnam",
+      "note": "The market regulator; relevant when coverage involves sanctions, approvals, or investigations."
+    },
+    "TTCK": {
+      "expansion_vi": "Thị trường chứng khoán",
+      "meaning_en": "Stock market",
+      "note": "Common shorthand in macro/market-wide commentary rather than single-ticker articles."
+    },
+    "CTCP": {
+      "expansion_vi": "Công ty cổ phần",
+      "meaning_en": "Joint-stock company",
+      "note": "Standard legal-entity prefix in full company names; helps confirm the entity referenced is the listed company."
+    },
+    "KQKD": {
+      "expansion_vi": "Kết quả kinh doanh",
+      "meaning_en": "Business results",
+      "note": "Common headline shorthand for quarterly/annual results coverage."
+    },
+    "LNST": {
+      "expansion_vi": "Lợi nhuận sau thuế",
+      "meaning_en": "Profit after tax",
+      "note": "Frequently contrasted with LNTT in the same article; conflating the two changes the magnitude/tone of a results story."
+    },
+    "LNTT": {
+      "expansion_vi": "Lợi nhuận trước thuế",
+      "meaning_en": "Profit before tax",
+      "note": "See LNST; the two figures often both appear and must be distinguished."
+    },
+    "NĐT": {
+      "expansion_vi": "Nhà đầu tư",
+      "meaning_en": "Investor",
+      "note": "Very high-frequency shorthand for 'investor(s)' in market-sentiment sentences."
+    },
+    "VĐL": {
+      "expansion_vi": "Vốn điều lệ",
+      "meaning_en": "Charter capital",
+      "note": "Appears in capital-raise/issuance stories; distinct from market cap or equity value."
+    },
+    "TGĐ": {
+      "expansion_vi": "Tổng Giám đốc",
+      "meaning_en": "CEO / General Director",
+      "note": "Needed to correctly attribute quotes/decisions to a company officer rather than the board."
+    },
+    "CT HĐQT": {
+      "expansion_vi": "Chủ tịch Hội đồng quản trị",
+      "meaning_en": "Chairman of the Board",
+      "note": "Distinct role from TGĐ; misattribution changes who is understood to be speaking or acting."
+    },
+    "TCTD": {
+      "expansion_vi": "Tổ chức tín dụng",
+      "meaning_en": "Credit institution",
+      "note": "Regulatory umbrella term covering banks and other lenders in NHNN policy coverage."
+    },
+    "GTGD": {
+      "expansion_vi": "Giá trị giao dịch",
+      "meaning_en": "Trading value",
+      "note": "Market-activity metric commonly abbreviated in daily market-wrap articles."
+    },
+    "KLGD": {
+      "expansion_vi": "Khối lượng giao dịch",
+      "meaning_en": "Trading volume",
+      "note": "Distinct metric from GTGD (value vs. volume); both are common in the same market-wrap paragraph."
+    },
+    "CP": {
+      "expansion_vi": "Cổ phiếu / Cổ phần",
+      "meaning_en": "Share / stock (or equity stake)",
+      "note": "Genuinely ambiguous shorthand — can mean the tradable share, an equity stake, or (in non-financial contexts) 'chính phủ' (government); resolve from context."
+    },
+    "DN": {
+      "expansion_vi": "Doanh nghiệp",
+      "meaning_en": "Enterprise / business",
+      "note": "Generic but extremely frequent shorthand for 'company/business' in macro and policy coverage."
+    },
+    "SGDCK": {
+      "expansion_vi": "Sở Giao dịch Chứng khoán",
+      "meaning_en": "Stock Exchange",
+      "note": "Appears in listing/delisting and exchange-rule stories (e.g. SGDCK TP.HCM for HOSE)."
+    }
+  }
+}
