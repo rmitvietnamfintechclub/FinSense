@@ -41,7 +41,9 @@ class PipelineSettings(BaseSettings):
     EXTRACTION_TEMPERATURE: float = 0.0
     PROMPT_VERSION: str = "v1"
 
-    AI_CONFIDENCE_THRESHOLD: float = 0.4
+    # Lower bound of the lowest INCLUDED band ("solid") in
+    # docs/RUBRICS/AI_CONFIDENCE.md. Matched pair — change both together.
+    AI_CONFIDENCE_THRESHOLD: float = 0.5
 
 class APISettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
