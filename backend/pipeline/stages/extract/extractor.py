@@ -86,7 +86,7 @@ def extract_from_text(article_text: str) -> ExtractionResult:
         return _failed("missing_prompt_template", str(exc))
     except RuntimeError as exc:
         return _failed("missing_config", str(exc))
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — last-resort: any failure becomes a record, never a crash
         return _failed(f"unexpected_error[{type(exc).__name__}]", str(exc))
 
     if not isinstance(payload, dict):
