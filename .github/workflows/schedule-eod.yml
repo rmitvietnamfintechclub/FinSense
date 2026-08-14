@@ -1,0 +1,42 @@
+name: Schedule EOD Batch
+
+on:
+  schedule:
+    # 00:30 ICT = 17:30 UTC ngay hom truoc (ICT = UTC+7).
+    # KHONG dat 23:59 ICT (16:59 UTC) — GitHub Actions cron thuong bi
+    # delay vai phut, neu job du dinh chay dung nua dem ma bi tre qua
+    # ranh gioi ngay, se tinh sai ngay va am tham bo sot 1 ngay.
+    - cron: "30 17 * * *"
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "Ngay can chay lai (YYYY-MM-DD, ICT). Bo trong de tu tinh 'hom qua'."
+        required: false
+        type: string
+
+jobs:
+  eod-batch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      # Build system moi: PEP 621 + hatchling, pyproject.toml o goc repo.
+      # Khong con Poetry — "packages = ['backend']" trong pyproject.toml
+      # da tu lam "backend" import duoc, khong can PYTHONPATH/--app-dir
+      # hack nhu bo cu.
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run EOD batch
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+        run: |
+          if [ -n "${{ inputs.target_date }}" ]; then
+            python -m backend.pipeline.stages.aggregate.eod_batch "${{ inputs.target_date }}"
+          else
+            python -m backend.pipeline.stages.aggregate.eod_batch
+          fi
