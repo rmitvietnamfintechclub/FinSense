@@ -106,6 +106,12 @@ paths:
                 $ref: '#/components/schemas/TickerDetail'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: Invalid window value (must be one of 24h/48h/72h)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -134,6 +140,12 @@ paths:
                 $ref: '#/components/schemas/TickerHistory'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: Invalid days value (must be one of 7/30/90)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -142,11 +154,13 @@ paths:
       tags: [ticker]
       summary: Recent events mentioning this ticker
       description: >
-        Returns paginated list of events that mention the ticker
-        within the selected time window.
+        Returns a paginated list of events that mention the ticker, newest
+        first — the ticker's full event history, NOT scoped to the
+        24h/48h/72h window (that window only applies to the live S_final
+        gauge on GET /ticker/{symbol}). Page 2, 3, ... keeps going back as
+        far as event_clusters has data for this ticker.
       parameters:
         - $ref: '#/components/parameters/symbol'
-        - $ref: '#/components/parameters/window'
         - $ref: '#/components/parameters/page'
       responses:
         '200':
@@ -157,6 +171,12 @@ paths:
                 $ref: '#/components/schemas/TickerEvents'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: page < 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -551,7 +571,13 @@ components:
           $ref: '#/components/schemas/Ticker'
         company_name:
           type: string
-          description: "TODO: see TickerFeedItem.company_name — same unresolved data source."
+          description: >
+            Sourced from backend/core/ticker_metadata.py (FS-39) — resolves the
+            TODO that used to sit here (see TickerFeedItem.company_name, still
+            open for the dashboard feed).
+        sector:
+          $ref: '#/components/schemas/Concept'
+          description: Primary sector, from ticker_metadata.py (FS-39)
         window:
           type: string
         sentiment_score:
@@ -567,6 +593,17 @@ components:
               type: integer
             negative_count:
               type: integer
+        article_count:
+          type: integer
+          description: Total event_coverage.total_articles across events mentioning this ticker in the window
+        event_count:
+          type: integer
+          description: Count of events mentioning this ticker in the window
+        last_updated:
+          type: string
+          format: date-time
+          nullable: true
+          description: Most recent updated_at among events mentioning this ticker — null if none
         is_empty_state:
           type: boolean
           description: true if no valid events in window — UI shows neutral grey gauge
@@ -578,8 +615,14 @@ components:
           $ref: '#/components/schemas/Ticker'
         days:
           type: integer
+          description: The requested range (7/30/90) — NOT the number of rows actually returned. See data.
         data:
           type: array
+          description: >
+            Oldest -> newest, one row per calendar day that exists in
+            daily_sentiment_history. Can be shorter than `days` if the EOD
+            batch hasn't run that many times yet — not an error. Nulls in
+            either field pass through untouched: no interpolation, no gap-filling.
           items:
             type: object
             properties:
@@ -587,7 +630,7 @@ components:
                 type: string
                 format: date
                 example: "2026-06-27"
-              sentiment_score:
+              daily_sentiment_score:
                 $ref: '#/components/schemas/SentimentScore'
               closing_price:
                 type: number
@@ -598,8 +641,6 @@ components:
       properties:
         ticker:
           $ref: '#/components/schemas/Ticker'
-        window:
-          type: string
         page:
           type: integer
         has_more:
@@ -618,15 +659,38 @@ components:
                 format: date-time
               article_count:
                 type: integer
-              sources:
-                type: object
-                properties:
-                  CafeF:
-                    type: integer
-                  VnExpress:
-                    type: integer
+                description: event_coverage.total_articles — articles ingested, higher than len(source_breakdown) by design
               sentiment_score:
                 $ref: '#/components/schemas/SentimentScore'
+                description: This ticker's entry from aggregated_analysis.ticker_sentiments — null if no source cleared AI_CONFIDENCE_THRESHOLD
+              source_breakdown:
+                type: array
+                description: >
+                  One row per source (not per article — each source contributes
+                  exactly one representative ai_response). Sources below
+                  AI_CONFIDENCE_THRESHOLD are excluded entirely, not shown with a
+                  null/greyed score.
+                items:
+                  type: object
+                  properties:
+                    source:
+                      type: string
+                      example: CafeF
+                    score:
+                      type: number
+                      format: float
+                      minimum: -1.0
+                      maximum: 1.0
+                      description: This source's own score for this ticker, from source_breakdown[].ai_response.ticker_sentiments[]
+                    article_title:
+                      type: string
+                      description: >
+                        TODO: representative_article does not persist its own
+                        title yet (see backend/core/schemas/event_cluster.py::
+                        RepresentativeArticle) — falls back to the cluster's
+                        event_title until the pipeline stores one per article.
+                    article_url:
+                      type: string
 
     # ── Audit ──
 

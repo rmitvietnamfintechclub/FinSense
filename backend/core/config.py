@@ -55,6 +55,11 @@ class APISettings(BaseSettings):
     DEFAULT_TICKERS_LIMIT: int = 5
     SENTIMENT_BUCKET_THRESHOLD: float = 0.2
 
+    # Ticker detail page (FS-37)
+    TICKER_EVENTS_PAGE_SIZE: int = 5
+    TICKER_HISTORY_DAYS: list[int] = [7, 30, 90]
+    DEFAULT_TICKER_HISTORY_DAYS: int = 30
+
 
 database_settings = DatabaseSettings()
 pipeline_settings = PipelineSettings()

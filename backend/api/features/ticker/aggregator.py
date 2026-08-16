@@ -24,7 +24,17 @@ async def _fetch_events(ticker: str, concepts: list[str], window_start: datetime
                 {"aggregated_analysis.concept_sentiments.concept": {"$in": concepts}},
             ],
         },
-        projection={"updated_at": 1, "aggregated_analysis": 1},
+        # event_coverage/cluster_id/created_at are dead weight for
+        # assemble_live_sentiment() itself, but ticker/service.py::get_ticker_detail
+        # (FS-37) reuses this same fetch for its article/event counts + last_updated —
+        # widened here instead of adding a second near-duplicate query.
+        projection={
+            "updated_at": 1,
+            "aggregated_analysis": 1,
+            "event_coverage": 1,
+            "cluster_id": 1,
+            "created_at": 1,
+        },
     )
     return await cursor.to_list(length=None)
 
