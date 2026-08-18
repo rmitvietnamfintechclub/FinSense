@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, Query
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
@@ -33,29 +35,28 @@ def db_dep() -> AsyncIOMotorDatabase:
     return get_db()
 
 
+WindowDep = Annotated[str, Depends(window_param)]
+DbDep = Annotated[AsyncIOMotorDatabase, Depends(db_dep)]
+
+
 # FS-22 — KHONG co window param
 @router.get("/summary", response_model=SummaryResponse)
-async def read_summary(
-    db: AsyncIOMotorDatabase = Depends(db_dep),
-) -> SummaryResponse:
+async def read_summary(db: DbDep) -> SummaryResponse:
     return await get_summary(db)
 
 
 # FS-23
 @router.get("/gauge", response_model=GaugeResponse)
-async def read_gauge(
-    window: str = Depends(window_param),
-    db: AsyncIOMotorDatabase = Depends(db_dep),
-) -> GaugeResponse:
+async def read_gauge(window: WindowDep, db: DbDep) -> GaugeResponse:
     return await get_gauge(db, window=window)
 
 
 # FS-24
 @router.get("/events", response_model=EventsResponse)
 async def read_events(
-    window: str = Depends(window_param),
+    window: WindowDep,
+    db: DbDep,
     limit: int = Query(api_settings.DEFAULT_EVENTS_LIMIT, ge=1, le=50),
-    db: AsyncIOMotorDatabase = Depends(db_dep),
 ) -> EventsResponse:
     return await get_events(db, window=window, limit=limit)
 
@@ -63,8 +64,8 @@ async def read_events(
 # FS-25
 @router.get("/tickers", response_model=TickersResponse)
 async def read_tickers(
-    window: str = Depends(window_param),
+    window: WindowDep,
+    db: DbDep,
     limit: int = Query(api_settings.DEFAULT_TICKERS_LIMIT, ge=1, le=50),
-    db: AsyncIOMotorDatabase = Depends(db_dep),
 ) -> TickersResponse:
     return await get_tickers(db, window=window, limit=limit)
