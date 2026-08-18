@@ -117,7 +117,7 @@ class TestNoConfidentRead:
 
 class TestThresholdConfig:
     def test_threshold_comes_from_config_with_expected_default(self):
-        assert pipeline_settings.AI_CONFIDENCE_THRESHOLD == pytest.approx(0.4)
+        assert pipeline_settings.AI_CONFIDENCE_THRESHOLD == pytest.approx(0.5)
 
 
 # --------------------------------------------------------------------------
