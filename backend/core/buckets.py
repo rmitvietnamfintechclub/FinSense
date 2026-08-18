@@ -25,21 +25,13 @@ from __future__ import annotations
 # so the 5-band scheme is a strict refinement of it rather than a competitor.
 # See the "Divergence from the live 3-band path" section of the rubric.
 # ============================================================
-BUCKET_EDGES: tuple[tuple[float, float], ...] = (
-    (-1.0, -0.6),
-    (-0.6, -0.2),
-    (-0.2, 0.2),
-    (0.2, 0.6),
-    (0.6, 1.0),
-)
-
-# Parallel to BUCKET_EDGES by index. The middle three deliberately reuse the
+# Labels: The middle three deliberately reuse the
 # exact strings bucket_sentiment() already returns, so the refinement collapses
 # back onto the existing vocabulary without a translation table.
-BUCKET_LABELS: tuple[str, ...] = (
-    "strongly_negative",
-    "negative",
-    "neutral",
-    "positive",
-    "strongly_positive",
+BUCKETS: tuple[tuple[float, float, str], ...] = (
+    (-1.0, -0.6, "strongly_negative"),
+    (-0.6, -0.2, "negative"),
+    (-0.2,  0.2, "neutral"),
+    ( 0.2,  0.6, "positive"),
+    ( 0.6,  1.0, "strongly_positive"),
 )
