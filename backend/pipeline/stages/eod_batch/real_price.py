@@ -4,7 +4,6 @@ from datetime import date as date_type
 import requests
 
 from backend.core.config import pipeline_settings
-from datetime import date
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +15,11 @@ def get_closing_price(ticker: str, date: date_type) -> float | None:
     (weekends/holidays), and malformed payloads all yield None so the nightly
     pipeline keeps running with a null price field.
     """
+    weekday = date.weekday()
+    if weekday >= 5:
+        logger.warning("No closing price for %s", date.strftime('%A'))
+        return None
+
     day = date.isoformat()
     params = {
         "sort": "date",
@@ -45,8 +49,6 @@ def get_closing_price(ticker: str, date: date_type) -> float | None:
         return None
 
     if not isinstance(rows, list) or not rows:
-        # The API returns HTTP 200 with an empty list for unknown tickers
-        # and non-trading days — both are expected, not errors.
         logger.info("No closing price for %s on %s (non-trading day or unknown ticker)", ticker, day)
         return None
 
@@ -55,8 +57,6 @@ def get_closing_price(ticker: str, date: date_type) -> float | None:
         logger.warning("Unexpected row shape for %s on %s: %r", ticker, day, row)
         return None
 
-    # Do not trust that the server honoured the query filter. A row for another
-    # day or another ticker would be written as this ticker's close for this day.
     if row.get("date") != day or str(row.get("code", "")).upper() != ticker.upper():
         logger.warning(
             "Price API returned a mismatched row for %s on %s: code=%r date=%r",
@@ -70,7 +70,3 @@ def get_closing_price(ticker: str, date: date_type) -> float | None:
         return None
 
     return float(close) * pipeline_settings.PRICE_QUOTE_MULTIPLIER
-
-if __name__ == "__main__":
-
-    print(get_closing_price("HPG", date(2026, 8, 14)))

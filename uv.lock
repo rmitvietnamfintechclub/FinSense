@@ -400,6 +400,11 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "mongomock" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "beautifulsoup4", specifier = "==4.15.0" },
@@ -422,6 +427,9 @@ requires-dist = [
     { name = "sentence-transformers", specifier = "==5.6.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "mongomock", specifier = ">=4.3.0" }]
 
 [[package]]
 name = "fsspec"
