@@ -1,8 +1,9 @@
-from pydantic import BaseModel
+# backend/core/schemas/ticker_dictionary.py
+from __future__ import annotations
 
-from backend.core.enums import Concept
+from pydantic import BaseModel, Field
 
 
-class TickerMetadata(BaseModel):
-    display_name: str
-    sector: Concept
+class TickerEntry(BaseModel):
+    display_name: str = Field(min_length=1)
+    aliases: list[str] = Field(min_length=1)
