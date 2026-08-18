@@ -33,15 +33,21 @@ class PipelineSettings(BaseSettings):
         )
     }
 
+    # Price Data Settings (FS30: VNDirect finfo API selected as primary provider)
+    PRICE_API_URL: str = "https://api-finfo.vndirect.com.vn/v4/stock_prices"
+    PRICE_API_TIMEOUT: int = 10  # seconds, per request
+    PRICE_QUOTE_MULTIPLIER: float = 1000.0  # provider quotes in thousands of VND
+
     # LLM Settings
     LLM_API_KEY: str = ""
-    LLM_MODEL_NAME: str = "gemini-2.5-flash"
+    LLM_MODEL_NAME: str = "gemini-3.6-flash"
     LLM_TIMEOUT: int = 60          # seconds, per request
     LLM_MAX_RETRIES: int = 1 
+
+    # Extraction Settings
     EXTRACTION_TEMPERATURE: float = 0.0
     PROMPT_VERSION: str = "v1"
-
-    AI_CONFIDENCE_THRESHOLD: float = 0.4
+    AI_CONFIDENCE_THRESHOLD: float = 0.5
 
 class APISettings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

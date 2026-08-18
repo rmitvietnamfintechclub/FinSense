@@ -27,3 +27,6 @@ Thumbs.db
 *.key
 
 /test.py
+/claudekit/
+/content/
+/Rhistory/

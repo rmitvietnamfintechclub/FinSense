@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from backend.pipeline.stages.aggregate.eod_batch import run_eod_batch
+from backend.pipeline.stages.eod_batch.eod_batch import run_eod_batch
 
 
 class _FakeHistoryCollection:
@@ -149,7 +149,7 @@ class TestRunEodBatch:
 
 class TestEnsureIndex:
     def test_calls_create_index_with_correct_spec(self):
-        from backend.pipeline.stages.aggregate.eod_batch import ensure_daily_sentiment_history_index
+        from backend.pipeline.stages.eod_batch.eod_batch import ensure_daily_sentiment_history_index
         from unittest.mock import MagicMock
 
         mock_collection = MagicMock()

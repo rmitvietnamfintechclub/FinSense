@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from backend.pipeline.stages.aggregate.eod_batch import run_eod_batch
+from backend.pipeline.stages.eod_batch.eod_batch import run_eod_batch
 
 
 class _FakeHistoryCollection:

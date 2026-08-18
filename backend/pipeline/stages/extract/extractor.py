@@ -86,7 +86,12 @@ def extract_from_text(article_text: str) -> ExtractionResult:
         return _failed("missing_prompt_template", str(exc))
     except RuntimeError as exc:
         return _failed("missing_config", str(exc))
-    except Exception as exc:
+    
+    except Exception as exc:  # noqa: BLE001 — last-resort: any failure becomes a record, never a crash
+        # Last arm of the chain above: every anticipated failure already has its own
+        # handler. This one exists so an unanticipated error degrades to a structured
+        # ExtractionResult instead of killing the whole run — the type name is kept in
+        # the reason so the gap is still diagnosable from the record.
         return _failed(f"unexpected_error[{type(exc).__name__}]", str(exc))
 
     if not isinstance(payload, dict):
