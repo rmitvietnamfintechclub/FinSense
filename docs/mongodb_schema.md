@@ -16,7 +16,6 @@
 | `daily_sentiment_history` | Nightly Batch Job | Serving API | Pre-computed EOD scores for historical chart |
 | `static_ontology` | Manual seed / Admin | Serving API | Concept → sector weight + alias map |
 | `audit_log` | Serving API (audit endpoints) | Admin Panel | Immutable log of every approve/correct action |
-| `frozen_test_set` | Manual seed only | Evaluation scripts | Hand-labeled benchmark — read-only forever |
 
 ---
 
@@ -185,36 +184,6 @@ Immutable. No application code path may delete or modify entries (US-G4).
 
 ---
 
-## 7. `frozen_test_set`
-
-Hand-labeled benchmark. Locked at W1. Read-only forever. Pipeline and audit endpoints must never write to this collection. A 403 guard must be enforced at the API level (US-G8).
-
-```json
-{
-  "_id": "ObjectId",
-  "article_id": "string",
-  "title": "string",
-  "full_content": "string",
-  "source": "string",
-  "url": "string",
-  "ticker_sentiments": [
-    { "ticker": "HPG", "score": -0.50, "bucket": "negative" }
-  ],
-  "concept_sentiments": [
-    { "concept": "STEEL", "score": -0.30, "bucket": "negative" }
-  ],
-  "labeled_by": "string",
-  "labeled_at": "ISODate",
-  "notes": "string | null"
-}
-```
-
-**Indexes:**
-- `article_id` → unique
-- No write access from application code — enforced at API middleware level
-
----
-
 ## Atlas Setup Checklist
 
 ### Step 1 — Create Cluster
@@ -250,7 +219,6 @@ Collections to create:
   - daily_sentiment_history
   - static_ontology
   - audit_log
-  - frozen_test_set
 ```
 
 ---

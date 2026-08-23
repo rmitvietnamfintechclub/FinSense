@@ -382,6 +382,39 @@ class TestRunAggregate:
         assert run_aggregate([], collection) == []
         assert collection.writes == []
 
+    def test_cluster_with_no_extraction_is_not_written(self):
+        # A quota-stopped run leaves most clusters unextracted. Writing an empty
+        # analysis over the empty default they already carry costs a round trip
+        # per cluster and changes nothing.
+        collection = FakeCollection()
+        cluster = _cluster(sources=[_unextracted_source()])
+
+        run_aggregate([cluster], collection, threshold=0.4)
+
+        assert collection.writes == []
+
+    def test_unextracted_cluster_is_still_returned(self):
+        # run_pipeline's summary counts what it gets back, so skipping the write
+        # must not drop the cluster from the result.
+        cluster = _cluster(sources=[_unextracted_source()])
+        assert run_aggregate([cluster], FakeCollection()) == [cluster]
+
+    def test_partly_extracted_cluster_is_still_written(self):
+        # One source pending must not suppress the other source's scores.
+        collection = FakeCollection()
+        cluster = _cluster(
+            sources=[
+                _source(0.9, tickers=[(Ticker.HPG, 0.8)]),
+                _unextracted_source(source="VnExpress"),
+            ]
+        )
+
+        run_aggregate([cluster], collection, threshold=0.4)
+
+        (hpg,) = cluster.aggregated_analysis.ticker_sentiments
+        assert hpg.score == pytest.approx(0.8)
+        assert set(collection.payloads) == {"evt_1"}
+
     def test_threshold_defaults_to_config_value(self, monkeypatch):
         # A 0.5-confidence source survives the real 0.4 default but must be
         # dropped once config says 0.6 — proving run_aggregate reads config.

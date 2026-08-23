@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 QUOTA_FAILURE = "llm_quota_exhausted"
 
 def run_extract(
-    clusters: list[EventCluster], collection: Collection
+    clusters: list[EventCluster], collection: Collection | None = None
 ) -> list[EventCluster]:
     if not clusters:
         return []

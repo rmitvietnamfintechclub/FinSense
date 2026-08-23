@@ -359,7 +359,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Forbidden:
-      description: Action not permitted (e.g. attempt to write to frozen_test_set)
+      description: Action not permitted for this account
       content:
         application/json:
           schema:
@@ -398,7 +398,7 @@ components:
     # Frozen vocabularies — kept in sync by hand with backend/core/enums.py.
     # These are closed sets on purpose: historical sentiment records are labeled
     # against this exact vocabulary. Do not add/remove values here without a
-    # corresponding backend enum change (and re-running the frozen test set).
+    # corresponding backend enum change.
 
     Ticker:
       type: string

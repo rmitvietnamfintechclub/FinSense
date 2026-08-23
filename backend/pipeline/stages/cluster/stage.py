@@ -206,6 +206,49 @@ def upsert_event_cluster(
     return event_cluster
 
 
+def upsert_event_clusters(
+    articles: Sequence[Article],
+    embeddings: NDArray[np.floating],
+    clusters: Sequence[Cluster],
+    collection: Collection | None = None,
+) -> list[EventCluster]:
+    """Batch form of `upsert_event_cluster` for a whole run.
+
+    Identical read-modify-write semantics, but every existing document is
+    fetched in one `$in` query instead of a `find_one` per cluster. That halves
+    the round trips: a ~78-cluster run went from ~156 to ~79.
+
+    The writes stay per-cluster on purpose. Collapsing them into a `bulk_write`
+    would cut this to a single round trip, but pymongo's `UpdateOne` passes a
+    `sort` argument that mongomock 4.3.0 (the newest release) does not accept,
+    so every test covering this path would break.
+    """
+    if not clusters:
+        return []
+    if collection is None:
+        collection = get_database().event_clusters
+
+    cluster_ids = [cluster.cluster_id for cluster in clusters]
+    existing_by_id = {
+        doc["cluster_id"]: EventCluster.model_validate(doc)
+        for doc in collection.find({"cluster_id": {"$in": cluster_ids}})
+    }
+
+    event_clusters = [
+        build_event_cluster(
+            articles,
+            embeddings,
+            cluster,
+            existing=existing_by_id.get(cluster.cluster_id),
+        )
+        for cluster in clusters
+    ]
+
+    for event_cluster in event_clusters:
+        save_event_cluster(event_cluster, collection=collection)
+    return event_clusters
+
+
 def load_existing_clusters(
     collection: Collection | None = None,
     lookback: timedelta | None = None,
@@ -249,9 +292,16 @@ def backfill_article_cluster_ids(
     if collection is None:
         collection = get_database().articles
 
+    # Group by cluster first: articles sharing a cluster can be set in one
+    # update_many, so this costs one round trip per distinct cluster rather
+    # than one per article.
+    urls_by_cluster: dict[str, list[str]] = {}
     for article, cluster_id in zip(articles, assignments, strict=True):
-        collection.update_one(
-            {"url": article.url}, {"$set": {"cluster_id": cluster_id}}
+        urls_by_cluster.setdefault(cluster_id, []).append(article.url)
+
+    for cluster_id, urls in urls_by_cluster.items():
+        collection.update_many(
+            {"url": {"$in": urls}}, {"$set": {"cluster_id": cluster_id}}
         )
 
 
@@ -294,11 +344,12 @@ def run_cluster(
         embeddings, existing, cluster_id_factory=_generate_cluster_id
     )
 
-    saved = [
-        upsert_event_cluster(articles, embeddings, cluster, collection=event_clusters)
-        for cluster in result.clusters
-        if cluster.article_indices
-    ]
+    saved = upsert_event_clusters(
+        articles,
+        embeddings,
+        [cluster for cluster in result.clusters if cluster.article_indices],
+        collection=event_clusters,
+    )
 
     backfill_article_cluster_ids(
         articles, result.assignments, collection=articles_collection

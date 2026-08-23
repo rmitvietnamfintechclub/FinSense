@@ -27,7 +27,6 @@ def setup_collections():
         "daily_sentiment_history",
         "static_ontology",
         "audit_log",
-        "frozen_test_set",
     ]:
         create_collection(name)
 
@@ -69,10 +68,6 @@ def setup_indexes():
     db.audit_log.create_index([("performed_at", DESCENDING)], name="performed_at_desc")
     db.audit_log.create_index("error_type", name="error_type")
     print("  audit_log: done")
-
-    # frozen_test_set
-    db.frozen_test_set.create_index("article_id", unique=True, name="article_id_unique")
-    print("  frozen_test_set: done")
 
 
 if __name__ == "__main__":

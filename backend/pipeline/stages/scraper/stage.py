@@ -11,7 +11,9 @@ logger = logging.getLogger(__name__)
 
 
 
-def run_scraper(clusters: list[EventCluster], collection: Collection) -> list[EventCluster]:
+def run_scraper(
+    clusters: list[EventCluster], collection: Collection | None = None
+) -> list[EventCluster]:
     if not clusters:
         return []
     if collection is None:
@@ -20,6 +22,12 @@ def run_scraper(clusters: list[EventCluster], collection: Collection) -> list[Ev
     operations = []
     for cluster in clusters:
         for sb in cluster.source_breakdown:
+            if sb.representative_article.content_fed_to_ai:
+                # Already fetched on an earlier run. Re-fetching would cost a
+                # request to the source for a body we already hold, which is how
+                # a re-run earns an HTTP 429 from the news site.
+                continue
+
             full_content = fetch_body(sb.source, sb.representative_article.url)
             if full_content is None:
                 logger.warning(

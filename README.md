@@ -7,23 +7,6 @@ the same market event, and uses an LLM to extract sentiment toward VN30 tickers 
 concepts. Scores are confidence-weighted and designed to be human-audited, giving a transparent
 read on media tone — not a trading signal.
 
-## Project Status
-
-FinSense is under active development. The ingestion and AI-extraction pipeline is functional;
-the serving API and web frontends are scaffolded but not yet implemented.
-
-| Component | Status |
-|---|---|
-| News ingestion → clustering → AI extraction pipeline | ✅ Implemented |
-| EOD sentiment history batch job | 🚧 Planned |
-| Serving API (FastAPI) | 🚧 Planned |
-| Public dashboard | 🚧 Planned |
-| Admin audit panel | 🚧 Planned |
-| Evaluation harness | 🚧 Partial |
-
-See [`backend/README.md`](backend/README.md) and [`frontend/README.md`](frontend/README.md) for
-component-level detail.
-
 ## Key Features
 
 - **Multi-source RSS ingestion** with URL normalization and deduplication.
@@ -77,8 +60,8 @@ FinSense/
 │   ├── admin-panel/        Authenticated audit panel
 │   ├── ui/                 Shared React components
 │   └── types/               API types generated from OpenAPI
-├── evaluation/          Sentiment extraction benchmarking against a labeled test set
-├── docs/                Architecture notes, DB schema, ADRs, OpenAPI spec
+├── evaluation/          Clustering-threshold calibration; extraction benchmarking (harness WIP)
+├── docs/                Pipeline reference, DB schema, ADRs, OpenAPI spec
 ├── scripts/             Operational scripts (DB init, seeding, evaluation)
 └── .github/workflows/    CI pipelines
 ```
@@ -103,8 +86,14 @@ event with AI-extracted sentiment. The API reads from MongoDB to serve dashboard
 admin corrections. Pipeline and API are decoupled — the pipeline never calls the API, and the
 API never calls the LLM.
 
-For a deeper architectural breakdown, see [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
-(TODO — not yet written) and [`docs/mongodb_schema.md`](docs/mongodb_schema.md).
+For a stage-by-stage breakdown of the pipeline — algorithms, failure handling, and the design
+decisions behind them — see [`docs/PIPELINE.md`](docs/PIPELINE.md). For the database shape, see
+[`docs/mongodb_schema.md`](docs/mongodb_schema.md). A broader
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is still TODO.
+
+Current implementation status, known-broken things, and measured performance are tracked in
+[`STATE.md`](STATE.md) — read it before assuming a component works, since much of this repo is
+scaffolding seeded ahead of implementation.
 
 ## Quick Start
 
@@ -134,13 +123,13 @@ without the API or frontend:
    ```bash
    uv venv
    source .venv/bin/activate      # macOS/Linux
-   # .venv\Scripts\activate       # Windows
+   .venv\Scripts\activate       # Windows
    ```
 
 2. Install dependencies into the active environment:
 
    ```bash
-   uv sync
+   uv sync --active
    ```
 
 3. Populate `.env` at the project root (see `.env.example`) — at minimum `MONGODB_URI` and
@@ -149,17 +138,19 @@ without the API or frontend:
    `MONGODB_DB_NAME` contains `dev` or `test`, and it asks for confirmation:
 
    ```bash
-   python scripts/reset_dev_db.py
+   python3 -m scripts.reset_dev_db
    ```
 
 5. Run the pipeline:
 
    ```bash
-   python -m backend.pipeline.main
+   python3 -m backend.pipeline.main
    ```
 
    This executes all five stages (RSS → cluster → scrape → extract → aggregate) once and logs a
-   per-cluster summary to stdout.
+   per-cluster summary to stdout. A run over a full feed snapshot takes well under a minute, but
+   the extract stage makes one Gemini call per cluster per source — around 80 calls on a cold
+   start — which will exhaust a free-tier key. It stops cleanly when the quota runs out.
 
 For the full test suite and API setup (once implemented), see
 [`backend/README.md`](backend/README.md).

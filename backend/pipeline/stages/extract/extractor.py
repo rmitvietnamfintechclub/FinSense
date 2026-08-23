@@ -9,6 +9,7 @@ from google.api_core.exceptions import (
 )
 from google.genai.errors import APIError
 from langchain_core.exceptions import OutputParserException
+from langchain_google_genai.chat_models import ChatGoogleGenerativeAIError
 from pydantic import BaseModel, ValidationError
 
 from backend.core.schemas.sentiment import AIResponse, ConceptSentiment, TickerSentiment
@@ -74,6 +75,17 @@ def extract_from_text(article_text: str) -> ExtractionResult:
         payload, model_version = invoke_llm(prompt)
     except ResourceExhausted as exc:
         return _failed("llm_quota_exhausted", str(exc), code=429)
+    except ChatGoogleGenerativeAIError as exc:
+        # langchain-google-genai funnels *every* 4xx ClientError through
+        # chat_models._handle_client_error, which re-raises it as this wrapper.
+        # A 429 therefore never reaches the ResourceExhausted arm above, so the
+        # real status has to be recovered from the wrapped cause. Without this,
+        # quota exhaustion is reported as an unexpected error and run_extract's
+        # early stop never fires.
+        code = getattr(exc.__cause__, "code", None)
+        if code == 429 or "RESOURCE_EXHAUSTED" in str(exc).upper():
+            return _failed("llm_quota_exhausted", str(exc), code=429)
+        return _failed("llm_api_error", str(exc), code=code)
     except (DeadlineExceeded, ServiceUnavailable) as exc:
         return _failed("llm_unavailable", str(exc))
     except httpx.TimeoutException as exc:
