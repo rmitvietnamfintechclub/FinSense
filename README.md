@@ -17,6 +17,8 @@ read on media tone — not a trading signal.
   sentiment from article text, constrained to a fixed VN30/sector vocabulary.
 - **Confidence-weighted aggregation** — combines multiple sources per event into a single score,
   excluding low-confidence extractions.
+- **End-of-day history** — a separate nightly batch rolls each ICT day's event sentiment into a
+  per-ticker daily score and joins the VNDirect closing price, backing the historical chart.
 - **Prompt and model versioning** — every AI response is stamped with the prompt and model
   version that produced it, so extraction quality can be tracked over time.
 - **Human-in-the-loop audit design** — data model supports approving or correcting AI scores
@@ -43,7 +45,7 @@ read on media tone — not a trading signal.
 - `sentence-transformers` (`intfloat/multilingual-e5-base`) for article embeddings
 
 **DevOps / Infrastructure**
-- GitHub Actions for CI (linting; more checks planned)
+- GitHub Actions for CI (linting; more checks planned) and the nightly EOD batch
 - Render (planned API hosting)
 - MongoDB Atlas (M0 free tier)
 
@@ -53,7 +55,7 @@ read on media tone — not a trading signal.
 FinSense/
 ├── backend/
 │   ├── core/          Shared config, database clients, schemas, scoring logic
-│   ├── pipeline/       RSS → cluster → scrape → extract → aggregate
+│   ├── pipeline/       RSS → cluster → scrape → extract → aggregate, plus the nightly EOD batch
 │   └── api/            Serving API (FastAPI) — in progress
 ├── frontend/
 │   ├── public-dashboard/   Public sentiment dashboard
@@ -81,10 +83,14 @@ flowchart LR
     F -->|audit corrections| C
 ```
 
-The pipeline runs on a schedule, fetching news, clustering it into events, and enriching each
-event with AI-extracted sentiment. The API reads from MongoDB to serve dashboards and handles
-admin corrections. Pipeline and API are decoupled — the pipeline never calls the API, and the
-API never calls the LLM.
+The pipeline fetches news, clusters it into events, and enriches each event with AI-extracted
+sentiment. A separate nightly batch then rolls the day's events into per-ticker daily scores. The
+API reads from MongoDB to serve dashboards and handles admin corrections. Pipeline and API are
+decoupled — the pipeline never calls the API, and the API never calls the LLM.
+
+Both are designed to run on a cron, but only the EOD batch has a workflow with content today, and
+it is not live until it reaches the default branch. Runs are manual for now — see
+[`STATE.md`](STATE.md).
 
 For a stage-by-stage breakdown of the pipeline — algorithms, failure handling, and the design
 decisions behind them — see [`docs/PIPELINE.md`](docs/PIPELINE.md). For the database shape, see
@@ -151,6 +157,18 @@ without the API or frontend:
    per-cluster summary to stdout. A run over a full feed snapshot takes well under a minute, but
    the extract stage makes one Gemini call per cluster per source — around 80 calls on a cold
    start — which will exhaust a free-tier key. It stops cleanly when the quota runs out.
+
+6. Optionally roll the day up into `daily_sentiment_history`:
+
+   ```bash
+   python3 -m backend.pipeline.eod_batch.eod_batch            # yesterday, ICT
+   python3 -m backend.pipeline.eod_batch.eod_batch 2026-08-23  # a specific past day
+   ```
+
+   This is a separate entrypoint, not part of `run_pipeline`. It writes one row per VN30 ticker
+   for the target day — a null score where the day had no confident events — and joins the
+   VNDirect closing price. Events are keyed to the ICT day they were **created**, so re-running a
+   past day reproduces the score that day first produced.
 
 For the full test suite and API setup (once implemented), see
 [`backend/README.md`](backend/README.md).

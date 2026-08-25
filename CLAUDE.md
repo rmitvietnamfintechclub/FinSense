@@ -19,7 +19,7 @@ it before adding files. Note it describes some things that don't match the tree 
 uv sync --extra dev                                  # install (Python >=3.13); dev extra = ruff, pytest, mongomock
 
 uv run python -m backend.pipeline.main               # run the full pipeline once (needs MONGODB_URI, LLM_API_KEY)
-uv run python -m backend.pipeline.stages.eod_batch.eod_batch [YYYY-MM-DD]  # EOD batch; date arg re-runs a past day
+uv run python -m backend.pipeline.eod_batch.eod_batch [YYYY-MM-DD]  # EOD batch; date arg re-runs a past day
 
 uv run --extra dev python -m pytest -q               # whole suite
 uv run --extra dev python -m pytest backend/pipeline/tests/unit -q         # fast, fully mocked
@@ -55,9 +55,11 @@ five coordinators follow it; if you add one, keep the `| None = None` default, a
 collection explicitly in tests** rather than relying on it — a test that falls through to
 `get_database()` writes to the real database.
 
-The EOD batch (`stages/eod_batch/`) is a separate cron entrypoint, not part of `run_pipeline`: it
+The EOD batch (`pipeline/eod_batch/`) is a separate cron entrypoint, not part of `run_pipeline`: it
 rolls each day's event sentiment into `daily_sentiment_history` and joins the VNDirect closing
-price. Day boundaries are ICT (UTC+7) — see `utc_to_ict_date`.
+price. Day boundaries are ICT (UTC+7) — see `utc_to_ict_date`. An event belongs to the day it was
+**created**, never `updated_at`: the cluster stage bumps `updated_at` on every rewrite, so keying on
+it would move events between days and stop past-day re-runs from reproducing their original score.
 
 **API** (`backend/api/`) — FastAPI, async via Motor. Reads MongoDB, never calls the LLM, never
 imports from `backend.pipeline`. One folder per domain under `features/` with
@@ -100,9 +102,10 @@ by `frontend/types/generate.sh` and must never be hand-edited.
   `source_client.py` — nothing else changes.
 - **`bulk_write` cannot be unit-tested with mongomock.** pymongo 4.17's `UpdateOne` passes a `sort`
   argument mongomock 4.3.0 rejects, and 4.3.0 is the newest release; mongomock also doesn't
-  implement `array_filters` at all. Stages using either (`scraper`, `extract`, `eod_batch`) need a
-  hand-written fake collection — see `_FakeCollection` in `tests/unit/test_scraper.py` or
-  `FakeCollection` in `test_aggregate.py`. This is why `cluster/stage.py` batches its reads but not
+  implement `array_filters` at all. Code using either (`scraper`, `extract`, `eod_batch`) needs a
+  hand-written fake collection — see `_FakeCollection` in `tests/unit/test_scraper.py`,
+  `FakeCollection` in `test_aggregate.py`, or `FakeHistoryCollection` in `test_eod_batch.py`, which
+  also enforces a unique index so the upsert contract stays under test. This is why `cluster/stage.py` batches its reads but not
   its writes; that's deliberate, don't "fix" it into a broken state.
 - **The LLM boundary raises langchain's exceptions, not Google's.** `langchain-google-genai` funnels
   every 4xx `ClientError` through `chat_models._handle_client_error` and re-raises it as
@@ -110,6 +113,15 @@ by `frontend/types/generate.sh` and must never be hand-edited.
   quota 429 — recover the real status from `exc.__cause__`. 5xx skip that wrapper and still arrive
   as `google.genai.errors.APIError`. Getting this wrong silently disables the extract stage's
   quota early-stop.
+- **A null `closing_price` is never written over an existing row.** `get_closing_price` returns
+  `None` both for "no price exists" (weekend, holiday) and "the fetch failed", and cannot tell them
+  apart. The EOD upsert therefore `$set`s the price only when it has one and uses `$setOnInsert` to
+  seed the field as null on a row's first write. Collapsing that back into a plain `$set` lets a
+  re-run whose fetch failed erase a price an earlier run stored — and re-running a past day is the
+  documented repair path.
+- **Every `__main__` entrypoint must call `setup_logging()`** (`backend/core/log.py`). Without it the
+  root logger sits at WARNING with no handler, so every `logger.info` — including run summaries — is
+  dropped and a successful scheduled run leaves an empty log.
 - DB schema change: update `docs/mongodb_schema.md` first, then `scripts/init_db.py`.
 - Ruff config lives in `pyproject.toml`: `extend-immutable-calls` whitelists `fastapi.Depends` /
   `fastapi.Query` against B008. Extend that list rather than adding `# noqa` at call sites.

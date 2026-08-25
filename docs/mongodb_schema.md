@@ -116,8 +116,7 @@ Pre-computed EOD scores. Written by nightly batch job. Zero computation at serve
   "date": "string — 'YYYY-MM-DD' format",
   "daily_sentiment_score": "float | null — null if no valid events that day",
   "closing_price": "number | null — from Price API; null if API unavailable",
-  "data_points_used": "number — count of valid events used in calculation",
-  "is_audited_fully": "boolean — false if any contributing event still unaudited"
+  "data_points_used": "number — count of valid events used in calculation"
 }
 ```
 

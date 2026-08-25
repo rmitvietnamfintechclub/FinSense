@@ -9,9 +9,9 @@ from pymongo import UpdateOne
 
 from backend.core.enums import Ticker
 from backend.core.formulas import confidence_weighted_avg
-from backend.pipeline.stages.eod_batch.real_price import get_closing_price
+from backend.pipeline.eod_batch.real_price import get_closing_price
 
-logger = logging.getLogger("pipeline.aggregate.eod_batch")
+logger = logging.getLogger(__name__)
  
 ICT = ZoneInfo("Asia/Ho_Chi_Minh")
  
@@ -76,7 +76,10 @@ def run_eod_batch(
     stats = {"tickers_processed": 0, "tickers_with_score": 0, "date": date_str}
 
     operations = []
-    all_events = list(collection.find({"updated_at": {"$gte": start_utc, "$lt": end_utc}}))
+    # Keyed on created_at, not updated_at: updated_at is bumped on every rewrite of
+    # the cluster, so an event that gains an article the next day would silently move
+    # out of this day's row and a re-run would not reproduce the original score.
+    all_events = list(collection.find({"created_at": {"$gte": start_utc, "$lt": end_utc}}))
     for ticker_member in Ticker:
         ticker = ticker_member.value
  
@@ -85,24 +88,36 @@ def run_eod_batch(
             scores, confidences, threshold=confidence_threshold
         )
  
+        # The adapter is injected, so its failure modes are open-ended. One
+        # ticker's price must never abort the other 29 rows.
         try:
             closing_price = price_adapter(ticker, target_date)
-        except Exception as e:
-            logger.warning(f"Price adapter failed for {ticker} on {date_str}: {e}")
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Price adapter failed for %s on %s: %s", ticker, date_str, e)
             closing_price = None
  
         record = {
             "ticker": ticker,
             "date": date_str,
             "daily_sentiment_score": daily_score,
-            "closing_price": closing_price,
             "data_points_used": len(contributing_ids),
         }
+        update: dict = {"$set": record}
+
+        # A None price means either "no price exists" (weekend, holiday) or "the
+        # fetch failed" — the adapter cannot tell them apart. Writing it would let
+        # a re-run whose fetch failed erase a price an earlier run already stored,
+        # and re-running a past day is the documented repair path. $setOnInsert
+        # still seeds the field as null on the row's first write.
+        if closing_price is None:
+            update["$setOnInsert"] = {"closing_price": None}
+        else:
+            record["closing_price"] = closing_price
  
         operations.append(
             UpdateOne(
                 {"ticker": ticker, "date": date_str},
-                {"$set": record},
+                update,
                 upsert=True,
             )
         )
@@ -114,7 +129,7 @@ def run_eod_batch(
     if operations:
         history_collection.bulk_write(operations, ordered=False)
  
-    logger.info(f"EOD batch complete for {date_str}: {stats}")
+    logger.info("EOD batch complete for %s: %s", date_str, stats)
     return stats
  
  
@@ -123,10 +138,19 @@ if __name__ == "__main__":
  
     from backend.core.config import pipeline_settings
     from backend.core.database import get_database
+    from backend.core.log import setup_logging
+ 
+    # Without this the root logger stays at WARNING with no handler, so every
+    # logger.info below — including the run summary — is dropped and a healthy
+    # nightly run leaves an empty log.
+    setup_logging()
  
     target = compute_target_date()
     if len(sys.argv) > 1:
-        target = date.fromisoformat(sys.argv[1])  # cho phep re-run tay: python eod_batch.py 2026-08-09
+        # cho phep re-run tay: python -m backend.pipeline.eod_batch.eod_batch 2026-08-09
+        target = date.fromisoformat(sys.argv[1])
+ 
+    logger.info("EOD batch starting for %s (ICT)", target.isoformat())
  
     db = get_database()
     run_eod_batch(

@@ -114,9 +114,9 @@ stages/
   aggregate/                   Stage 5 — event-level aggregation
     event_aggregator.py        Confidence-weighted average across a cluster's sources
     stage.py                   Stage coordinator — run_aggregate()
-  eod_batch/                   Separate cron entrypoint — NOT part of run_pipeline
-    eod_batch.py               Rolls daily sentiment into daily_sentiment_history (ICT days)
-    real_price.py              VNDirect closing-price adapter
+eod_batch/                     Separate cron entrypoint — NOT part of run_pipeline, so not a stage
+  eod_batch.py                 Rolls daily sentiment into daily_sentiment_history (ICT days)
+  real_price.py                VNDirect closing-price adapter
 lexicon/                       JSON config files — pipeline-only
   vietnam_financial_lexicon.json   Sentiment terms, abbreviations, aliases (currently unused)
   concept_dictionary.json          Concept alias resolution (currently unused)
@@ -301,6 +301,10 @@ scripts/
   schedule-pipeline.yml   Cron trigger for the pipeline
   schedule-eod.yml        Cron trigger for EOD batch aggregation
 ```
+
+This block is the intended shape. Most of these files are still 0 bytes — `STATE.md` lists which
+ones actually have content. Scheduled workflows run **only from the default branch**, so a cron
+added on a feature branch does nothing until it merges.
 
 All checks run on every PR to `main`. You cannot merge without passing CI. Do
 not bypass unless you are the project lead and the commit is structural/chore

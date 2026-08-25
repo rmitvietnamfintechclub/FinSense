@@ -430,9 +430,10 @@ Gemini key in a single run.
 
 ## Related
 
-- `stages/eod_batch/` is a **separate cron entrypoint**, not part of `run_pipeline`. It rolls each
+- `pipeline/eod_batch/` is a **separate cron entrypoint**, not part of `run_pipeline`. It rolls each
   day's event sentiment into `daily_sentiment_history` and joins the VNDirect closing price. Day
-  boundaries are ICT (UTC+7) — see `utc_to_ict_date`.
+  boundaries are ICT (UTC+7) — see `utc_to_ict_date`, and an event is keyed to its `created_at`, not
+  its `updated_at`, so that a re-run of a past day reproduces the score that day first produced.
 - `docs/CLUSTERING_THRESHOLD.md` — how 0.91 was derived, and the centroid proof.
 - `docs/mongodb_schema.md` — full collection and index reference.
 - `docs/RUBRICS/` — the sentiment and confidence scoring rubrics the prompt encodes.

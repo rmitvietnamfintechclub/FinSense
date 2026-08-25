@@ -15,12 +15,15 @@ def get_closing_price(ticker: str, date: date_type) -> float | None:
     (weekends/holidays), and malformed payloads all yield None so the nightly
     pipeline keeps running with a null price field.
     """
-    weekday = date.weekday()
-    if weekday >= 5:
-        logger.warning("No closing price for %s", date.strftime('%A'))
+    day = date.isoformat()
+
+    if date.weekday() >= 5:
+        logger.info(
+            "No closing price for %s on %s: the market is closed on %s",
+            ticker, day, date.strftime('%A'),
+        )
         return None
 
-    day = date.isoformat()
     params = {
         "sort": "date",
         "q": f"code:{ticker}~date:gte:{day}~date:lte:{day}",
@@ -34,7 +37,7 @@ def get_closing_price(ticker: str, date: date_type) -> float | None:
             timeout=pipeline_settings.PRICE_API_TIMEOUT,
         )
         resp.raise_for_status()
-        rows = resp.json().get("data", [])
+        payload = resp.json()
     except requests.exceptions.Timeout:
         logger.warning(
             "Timeout (%ss) fetching closing price for %s on %s",
@@ -42,12 +45,15 @@ def get_closing_price(ticker: str, date: date_type) -> float | None:
         )
         return None
     except requests.exceptions.RequestException as e:
+        # JSONDecodeError subclasses RequestException, so a non-JSON body lands here.
         logger.warning("Failed to fetch closing price for %s on %s: %s", ticker, day, e)
         return None
-    except Exception as e:
-        logger.warning("Malformed price response for %s on %s: %s", ticker, day, e)
+
+    if not isinstance(payload, dict):
+        logger.warning("Malformed price response for %s on %s: %r", ticker, day, payload)
         return None
 
+    rows = payload.get("data", [])
     if not isinstance(rows, list) or not rows:
         logger.info("No closing price for %s on %s (non-trading day or unknown ticker)", ticker, day)
         return None

@@ -7,7 +7,7 @@ evidence a feature exists.
 Architecture lives in `CLAUDE.md`, the pipeline's internals in `docs/PIPELINE.md`. This file only
 tracks *what works right now*.
 
-**Last verified: 2026-08-23.** Re-verify before trusting anything below if the date is stale:
+**Last verified: 2026-08-25.** Re-verify before trusting anything below if the date is stale:
 
 ```shell
 uv run --extra dev python -m pytest -q                  # suite health
@@ -20,7 +20,7 @@ find . -path ./.venv -prune -o -name '*.py' -size -1c -print   # find the empty 
 | Component | Status |
 |---|---|
 | Pipeline `rss → cluster → scraper → extract → aggregate` | **Verified end to end on live data** |
-| EOD batch (`stages/eod_batch/`) + VNDirect price adapter | Implemented; never run against real data |
+| EOD batch (`pipeline/eod_batch/`) + VNDirect price adapter | Reviewed and hardened 2026-08-25; suite green, **never run against real data** |
 | API — ticker + dashboard features | Implemented, **not runnable** (see below) |
 | API — auth, audit, events, history, internal | Empty files, routers commented out in `main.py` |
 | Frontend (both apps, `ui/`, `types/`) | Every file 0 bytes — cannot be installed or run |
@@ -45,19 +45,11 @@ below.
 
 ## Health
 
-- **Test suite: 41 failing, 196 passing, 10 skipped.** The failures split into three unrelated
-  causes, and only one is a stale expectation:
-  - **24 in `test_eod_batch.py` — environment, not code.** `BulkOperationBuilder.add_update() got an
-    unexpected keyword argument 'sort'`. pymongo 4.17's `UpdateOne` always passes `sort`; mongomock
-    4.3.0 does not accept it, and **4.3.0 is the newest release**, so no upgrade fixes this. Any
-    `bulk_write([UpdateOne(...)])` is untestable under mongomock. mongomock also doesn't implement
-    `array_filters` at all, which the scraper and extract stages both use.
-  - **15 in `test_dashboard.py` — stale expectation.** They monkeypatch
-    `dashboard.service.get_database`, which the module no longer has.
-  - **2 others**: one `NoneType` subscript in `test_eod_batch.py`, one logging assertion in
-    `test_price_adapter.py`.
-- **`ruff check backend/` reports 3 errors** — 2× `BLE001` (blind `except Exception`), 1× `DTZ001`
-  (naive datetime in a test). CI only runs ruff, so this is the gate that matters and it is red.
+- **Test suite: 15 failing, 227 passing, 10 skipped.** One cause, all in `test_dashboard.py`:
+  they monkeypatch `dashboard.service.get_database`, which the module no longer has.
+- **`ruff check backend/` is clean.** CI only runs ruff, so this is the gate that matters.
+- `test_eod_batch.py` and `test_price_adapter.py` are fully green (57 tests). The former no longer
+  uses mongomock for `daily_sentiment_history` — see `FakeHistoryCollection`.
 - No test execution in CI at all; `ci.yml` runs ruff and nothing else.
 
 ## Known broken / blocked
@@ -76,9 +68,15 @@ below.
 - **The Gemini key hits a rate limit almost immediately.** One run got 19 extractions before 429s;
   the next got 0. Which limit (RPM / RPD / TPM) is unresolved — the 429 body is generic. Check the
   quota page at ai.google.dev before writing retry logic. `LLM_MAX_RETRIES` is `1`.
-- **`schedule-eod.yml` invokes a module path that doesn't exist** —
-  `backend.pipeline.stages.aggregate.eod_batch`, but the module lives at
-  `backend.pipeline.stages.eod_batch.eod_batch`. That workflow fails on every run.
+- **The EOD cron is not live.** `schedule-eod.yml` has content only on the working branch; on `main`
+  the file is still 0 bytes. Scheduled workflows run **only from the default branch**, so nothing is
+  scheduled until that merges.
+- **No repository secrets exist.** `repos/.../actions/secrets` returns `total_count: 0`, so
+  `MONGODB_URI` is unset in Actions and the EOD job would die at `get_client()`. Atlas's IP access
+  list also has to admit GitHub runners (they have no fixed IPs) before a run can connect.
+- **Nothing populates `event_clusters` on a schedule.** `schedule-pipeline.yml` is 0 bytes. Once the
+  EOD cron is live it will roll up whatever a human last ran locally, writing 30 null rows on every
+  day nobody ran the pipeline by hand. Schedule the pipeline before trusting the history chart.
 - **Bare `pytest` does not exclude `live` tests.** No `[tool.pytest.ini_options]` block, so the
   `live` marker is unregistered and quota-costing Gemini tests are only kept out by their `skipif`
   on a missing `LLM_API_KEY`.
@@ -143,8 +141,10 @@ Ordered by what unblocks the most:
 2. Resolve which Gemini limit you're hitting, from the quota dashboard. That decides whether the
    answer is retries/backoff or a paid tier.
 3. Add `fastapi`/`uvicorn` to `pyproject.toml` — nothing about the API can be verified until then.
-4. Fix the 3 ruff errors; CI is red.
+4. Give `schedule-pipeline.yml` content. The EOD rollup is scheduled ahead of the thing it rolls up.
 5. Close the resume gap in `run_pipeline` so a stopped run can be continued without a reset.
-6. Fix `schedule-eod.yml`'s module path.
-7. Repair the remaining test failures, then add a test job to CI so they can't rot again.
+6. Repair the 15 `test_dashboard.py` failures, then add a test job to CI so they can't rot again.
+7. Batch the EOD price fetch — 30 sequential requests per night where VNDirect's `q` accepts a
+   comma-separated code list. Also worth a projection on the day's `find()` and a single pass in
+   `_collect_ticker_scores` instead of one per ticker.
 8. Populate the ADRs — the decisions are named but never justified in-repo.
