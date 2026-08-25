@@ -10,7 +10,7 @@ Read this before touching anything in the repo.
 ```
 backend/       Python backend — pipeline and API
 frontend/      Next.js frontend — public dashboard and admin panel
-evaluation/    Frozen test set and evaluation harness — read-only test data
+evaluation/    Evaluation harness and calibration sweeps
 docs/          Architecture, schema, onboarding, ADRs, OpenAPI spec
 scripts/       One-off ops scripts (DB init, seeding, validation)
 .github/       CI/CD workflows and branch protection rules
@@ -63,7 +63,7 @@ external/
 tests/
   unit/                        Unit tests per feature
   integration/                 Route-level integration tests
-  e2e/                         End-to-end flows (login, frozen set guard)
+  e2e/                         End-to-end flows (e.g. admin login)
 ```
 
 **Adding a new API endpoint:** create a new folder under `features/` with
@@ -80,8 +80,11 @@ cluster gets its full body scraped, so scraping after clustering avoids
 fetching bodies we will never send to the LLM. `content_fed_to_ai` is therefore
 `None` at clustering time and populated by the scraper stage.
 
+`docs/PIPELINE.md` documents every stage in detail — read it before changing
+stage internals; this section only covers where files belong.
+
 ```
-run.py                         Pipeline entrypoint, stage orchestration
+main.py                        Pipeline entrypoint, stage orchestration — run_pipeline()
 stages/
   rss/                         Stage 1 — RSS ingestion
     rss_fetcher.py             Fetches and parses RSS feeds from all sources
@@ -108,19 +111,24 @@ stages/
       v2.txt
       v3.txt
     stage.py                   Stage coordinator — run_extract()
-  aggregate/                   Stage 5 — EOD batch scoring and event aggregation
-    eod_batch.py
-    event_aggregator.py
-lexicon/                       JSON config files — read by pipeline at runtime
-  vietnam_financial_lexicon.json   Sentiment terms, abbreviations, aliases
-  concept_dictionary.json          Concept alias resolution
-  static_ontology.json             Ticker → concept weight map
+  aggregate/                   Stage 5 — event-level aggregation
+    event_aggregator.py        Confidence-weighted average across a cluster's sources
+    stage.py                   Stage coordinator — run_aggregate()
+eod_batch/                     Separate cron entrypoint — NOT part of run_pipeline, so not a stage
+  eod_batch.py                 Rolls daily sentiment into daily_sentiment_history (ICT days)
+  real_price.py                VNDirect closing-price adapter
+lexicon/                       JSON config files — pipeline-only
+  vietnam_financial_lexicon.json   Sentiment terms, abbreviations, aliases (currently unused)
+  concept_dictionary.json          Concept alias resolution (currently unused)
   relevance_keywords.json          Keywords used by relevance filter in rss/filter.py
 tests/
   unit/                        Unit tests per stage — fully mocked, no network
   integration/                 Full pipeline integration test — mongomock, no network
   live/                        Real Gemini API calls — costs quota, excluded by default
 ```
+
+`static_ontology.json` and `ticker_metadata.json` live in `backend/core/data/`, **not** in
+`pipeline/lexicon/` — they are shared with the API, and nothing under `pipeline/` may be.
 
 **Stage structure convention:** every stage has helper modules plus a
 `stage.py` holding the coordinator function (`run_<stage>`). The coordinator is
@@ -150,8 +158,8 @@ edit existing version files — they are the historical record, and
 
 **Changing the model:** don't, mid-evolution. `model_version` is stored on every
 `AIResponse`. Swapping models between evolutions makes the deltas
-uninterpretable — if you must switch, re-run the frozen test set to
-re-establish the baseline.
+uninterpretable — if you must switch, treat everything before the switch as a
+separate baseline.
 
 **Changing lexicon files:** edit the JSON directly. Run
 `scripts/validate_lexicon.py` after every change.
@@ -228,21 +236,17 @@ frontend/
 
 ```
 evaluation/
-  frozen_test_set/     Hand-labeled benchmark — NEVER modify, NEVER write to this
   cluster_threshold.py Clustering threshold sweep — see docs/CLUSTERING_THRESHOLD.md
-  runner.py            Runs extraction against the frozen test set
+  runner.py            Runs extraction against the evaluation set
   metrics.py           Computes bucket agreement rate against ground truth
   results/             JSON results per evolution — append only, never overwrite
-    evolution_1_baseline.json
-    evolution_2_domain.json
-    evolution_3_prompting.json
+                       (removed 2026-08-23; recreate with that rule intact)
 ```
 
 **Hard rules:**
-- `frozen_test_set/` is read-only forever. No exceptions. No audit action, no
-  pipeline write, no API endpoint may touch it.
 - `results/` files are append-only. Add a new file for each new evaluation run —
-  never overwrite existing ones.
+  never overwrite existing ones. The directory does not currently exist; the rule
+  applies from the moment it is recreated.
 - Evaluation uses bucket agreement, not raw float matching. Buckets are derived
   at read time from the stored float — never persisted alongside it.
 
@@ -280,7 +284,7 @@ scripts/
   reset_dev_db.py      Drops and recreates the dev database — never point this at production
   seed_admins.py       Creates admin user accounts — reads credentials from env vars
   validate_lexicon.py  Validates lexicon JSON files for schema correctness — run after any lexicon edit
-  run_evaluation.py    Triggers an evaluation run against the frozen test set
+  run_evaluation.py    Triggers an evaluation run
 ```
 
 ---
@@ -297,6 +301,10 @@ scripts/
   schedule-pipeline.yml   Cron trigger for the pipeline
   schedule-eod.yml        Cron trigger for EOD batch aggregation
 ```
+
+This block is the intended shape. Most of these files are still 0 bytes — `STATE.md` lists which
+ones actually have content. Scheduled workflows run **only from the default branch**, so a cron
+added on a feature branch does nothing until it merges.
 
 All checks run on every PR to `main`. You cannot merge without passing CI. Do
 not bypass unless you are the project lead and the commit is structural/chore

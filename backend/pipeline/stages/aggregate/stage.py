@@ -27,7 +27,12 @@ def run_aggregate(
     if collection is None:
         collection = get_database().event_clusters
 
+    skipped = 0
     for cluster in clusters:
+        if all(sb.ai_response is None for sb in cluster.source_breakdown):
+            skipped += 1
+            continue
+
         analysis = build_aggregated_analysis(cluster.source_breakdown, threshold)
         cluster.aggregated_analysis = analysis
         collection.update_one(
@@ -39,5 +44,10 @@ def run_aggregate(
             cluster.cluster_id,
             len(analysis.ticker_sentiments),
             len(analysis.concept_sentiments),
+        )
+
+    if skipped:
+        logger.info(
+            "Skipped %d of %d clusters with no extraction yet", skipped, len(clusters)
         )
     return clusters

@@ -295,7 +295,7 @@ Rubric examples must be real scraped article text drawn from
 `event_clusters.source_breakdown.representative_article.content_fed_to_ai`, and each
 must be cited with its `cluster_id` and source (CafeF / VnExpress) so it stays
 traceable. At the time of writing, `event_clusters` contained **0 documents**, as did
-`articles` and `frozen_test_set` — there was no real text to draw on anywhere in the
+`articles` — there was no real text to draw on anywhere in the
 database.
 
 No example has been invented, paraphrased, or approximated to fill the gap, and none

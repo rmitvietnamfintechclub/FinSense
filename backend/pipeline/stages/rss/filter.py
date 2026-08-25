@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import unicodedata
+from collections.abc import Iterable
 from pathlib import Path
 
 from .url_normalizer import normalize_url
@@ -25,6 +26,21 @@ logger = logging.getLogger(__name__)
 def is_duplicate(url: str, collection) -> bool:
     """True if this URL (normalized) has already been ingested."""
     return collection.find_one({"url": normalize_url(url)}) is not None
+
+
+def existing_urls(urls: Iterable[str], collection) -> set[str]:
+    """Batch form of `is_duplicate`: the subset of `urls` already ingested.
+
+    One `$in` query instead of one round trip per candidate. A feed pull is
+    ~100 articles and the database is remote, so the per-article form costs
+    ~100 sequential round trips where this costs one.
+    """
+    normalized = {normalize_url(url) for url in urls}
+    if not normalized:
+        return set()
+
+    found = collection.find({"url": {"$in": list(normalized)}}, {"url": 1})
+    return {doc["url"] for doc in found}
 
 
 # --- F3: relevance filter --------------------------------------------------

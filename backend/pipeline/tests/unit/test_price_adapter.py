@@ -6,7 +6,7 @@ import pytest
 import requests
 
 # NOTE: update this import if you collapse the package to backend/external/price.py
-import backend.pipeline.stages.eod_batch.real_price as adapter
+import backend.pipeline.eod_batch.real_price as adapter
 
 TRADING_DAY = date(2026, 8, 7)  # Friday
 SUNDAY = date(2026, 8, 9)
