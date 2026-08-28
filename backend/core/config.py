@@ -59,7 +59,15 @@ class APISettings(BaseSettings):
     # Dashboard
     DEFAULT_EVENTS_LIMIT: int = 5
     DEFAULT_TICKERS_LIMIT: int = 5
+    MAX_PAGE_SIZE: int = 50
     SENTIMENT_BUCKET_THRESHOLD: float = 0.2
+
+    # CORS — the two Next.js apps. Browsers block cross-origin fetches without
+    # this, so an unlisted frontend origin fails at preflight, not in the route.
+    CORS_ORIGINS: list[str] = [
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ]
 
 
 database_settings = DatabaseSettings()

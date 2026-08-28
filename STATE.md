@@ -21,7 +21,7 @@ find . -path ./.venv -prune -o -name '*.py' -size -1c -print   # find the empty 
 |---|---|
 | Pipeline `rss → cluster → scraper → extract → aggregate` | **Verified end to end on live data** |
 | EOD batch (`pipeline/eod_batch/`) + VNDirect price adapter | Reviewed and hardened 2026-08-25; suite green, **never run against real data** |
-| API — ticker + dashboard features | Implemented, **not runnable** (see below) |
+| API — ticker + dashboard features | Implemented and runnable; routes smoke-tested, **never run against real Atlas data** |
 | API — auth, audit, events, history, internal | Empty files, routers commented out in `main.py` |
 | Frontend (both apps, `ui/`, `types/`) | Every file 0 bytes — cannot be installed or run |
 | Evaluation harness | Only `cluster_threshold.py` works; runner/metrics empty, no ground truth |
@@ -46,7 +46,9 @@ below.
 ## Health
 
 - **Test suite: 15 failing, 227 passing, 10 skipped.** One cause, all in `test_dashboard.py`:
-  they monkeypatch `dashboard.service.get_database`, which the module no longer has.
+  they monkeypatch `dashboard.service.get_database` and call the services synchronously. The module
+  is async + injected-`db` and has moved further since (pagination, `rank`, `sources` counts), so
+  the whole file needs rewriting, not patching. All four dashboard endpoints are untested.
 - **`ruff check backend/` is clean.** CI only runs ruff, so this is the gate that matters.
 - `test_eod_batch.py` and `test_price_adapter.py` are fully green (57 tests). The former no longer
   uses mongomock for `daily_sentiment_history` — see `FakeHistoryCollection`.
@@ -54,8 +56,14 @@ below.
 
 ## Known broken / blocked
 
-- **The API cannot run.** `fastapi` and `uvicorn` are imported by `backend/api` but absent from
-  `pyproject.toml` and `uv.lock`. A clean `uv sync` cannot serve the API.
+- **The API has never touched a real database.** Endpoints were verified with a hand-written fake
+  collection only. Nothing has confirmed the `event_clusters` documents the pipeline actually writes
+  round-trip through the dashboard queries.
+- **Live-vs-historical weighting disagree by design.** Serving queries window and decay on
+  `updated_at`, while the EOD batch keys the day on `created_at` (documented in CLAUDE.md). The
+  cluster stage bumps `updated_at` on every rewrite, so an old event that gains one article is
+  weighted as brand new in the live gauge but stays on its original day in the chart. Accepted
+  deliberately on 2026-08-28; revisit if the two views visibly contradict each other.
 - **A stopped run cannot be resumed.** `run_pipeline` returns early when RSS finds no new articles,
   but RSS has already persisted the batch. If extraction dies partway, the next run stops
   immediately and the half-finished clusters are never revisited — despite `run_extract` and
@@ -140,10 +148,10 @@ Ordered by what unblocks the most:
 1. Throttle the scraper — you lose real articles every run and it worsens with each one.
 2. Resolve which Gemini limit you're hitting, from the quota dashboard. That decides whether the
    answer is retries/backoff or a paid tier.
-3. Add `fastapi`/`uvicorn` to `pyproject.toml` — nothing about the API can be verified until then.
+3. Run the API against a seeded Atlas dev database — every endpoint so far is fake-collection only.
 4. Give `schedule-pipeline.yml` content. The EOD rollup is scheduled ahead of the thing it rolls up.
 5. Close the resume gap in `run_pipeline` so a stopped run can be continued without a reset.
-6. Repair the 15 `test_dashboard.py` failures, then add a test job to CI so they can't rot again.
+6. Rewrite `test_dashboard.py` against the async + DI services, then add a test job to CI so it can't rot again.
 7. Batch the EOD price fetch — 30 sequential requests per night where VNDirect's `q` accepts a
    comma-separated code list. Also worth a projection on the day's `find()` and a single pass in
    `_collect_ticker_scores` instead of one per ticker.

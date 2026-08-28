@@ -30,56 +30,84 @@ paths:
   # DASHBOARD
   # ─────────────────────────────────────────
 
-  /dashboard/overview:
+  /dashboard/summary:
     get:
       tags: [dashboard]
-      summary: Dashboard metric cards + Fear & Greed gauge
+      summary: Dashboard metric cards
       description: >
-        Returns article count, event count, last updated timestamp,
-        and gauge data for the selected time window.
-        Tickers tracked is a frontend constant — not returned here.
-      parameters:
-        - $ref: '#/components/parameters/window'
+        Global counts and the system-wide last-updated timestamp.
+        Deliberately window-independent — these are totals, not window slices,
+        so the cards do not flicker when the user changes the gauge window.
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DashboardOverview'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                $ref: '#/components/schemas/DashboardSummary'
         '500':
           $ref: '#/components/responses/ServerError'
 
-  /dashboard/feed:
+  /dashboard/gauge:
     get:
       tags: [dashboard]
-      summary: Top tickers or top events feed
-      description: >
-        Returns top 5 items per page.
-        sort=ticker → ranked by event volume, includes S_final score.
-        sort=event → ranked by article volume, no sentiment score.
-        Use page param for load more.
+      summary: Fear & Greed gauge for the selected window
       parameters:
         - $ref: '#/components/parameters/window'
-        - name: sort
-          in: query
-          required: true
-          schema:
-            type: string
-            enum: [ticker, event]
-          description: Feed mode — top tickers by event volume or top events by article volume
-        - $ref: '#/components/parameters/page'
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DashboardFeed'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                $ref: '#/components/schemas/DashboardGauge'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /dashboard/events:
+    get:
+      tags: [dashboard]
+      summary: Top events in the window, ranked by article volume
+      description: >
+        Kept separate from /dashboard/tickers rather than merged behind a sort
+        param: the two payloads share no fields and are rendered by unrelated
+        widgets, so a polymorphic union would only force a discriminated type on
+        every consumer for no gain.
+      parameters:
+        - $ref: '#/components/parameters/window'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardEvents'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /dashboard/tickers:
+    get:
+      tags: [dashboard]
+      summary: Top tickers in the window, ranked by event volume
+      parameters:
+        - $ref: '#/components/parameters/window'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardTickers'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -87,15 +115,24 @@ paths:
   # TICKER DETAIL
   # ─────────────────────────────────────────
 
-  /ticker/{symbol}:
+  # Path param is {ticker} here, not the {symbol} the two unimplemented ticker
+  # routes below still use. Align those on {ticker} when they get built.
+  /ticker/{ticker}/sentiment:
     get:
       tags: [ticker]
-      summary: Ticker identity card + live sentiment gauge
+      summary: Live S_final for one ticker
       description: >
-        Returns company info and live S_final score for the selected window.
-        Score is computed at request time from event_clusters — not from daily_sentiment_history.
+        Score is computed at request time from event_clusters — not from
+        daily_sentiment_history. An unknown symbol is a 404, never a 200 with a
+        zero score, so the client can tell it apart from a genuinely quiet ticker.
+        Lowercase input is accepted and upper-cased server-side.
       parameters:
-        - $ref: '#/components/parameters/symbol'
+        - name: ticker
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Ticker'
+          example: HPG
         - $ref: '#/components/parameters/window'
       responses:
         '200':
@@ -103,11 +140,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TickerDetail'
+                $ref: '#/components/schemas/TickerSentiment'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/ServerError'
+
 
   /ticker/{symbol}/history:
     get:
@@ -328,6 +368,17 @@ components:
         default: 1
       description: Page number for paginated results (5 items per page)
 
+    limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 5
+      description: Page size. Defaults come from APISettings.DEFAULT_*_LIMIT.
+
     symbol:
       name: symbol
       in: path
@@ -376,6 +427,20 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: >
+        Query or path parameter failed validation. FastAPI's native shape —
+        a `detail` array, not the `Error` object — so clients must not assume
+        `Error` here.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                type: array
+                items:
+                  type: object
 
   schemas:
 
@@ -452,124 +517,162 @@ components:
 
     # ── Dashboard ──
 
-    DashboardOverview:
+    DashboardSummary:
       type: object
+      required: [total_tickers, total_articles, total_events, last_updated]
+      properties:
+        total_tickers:
+          type: integer
+          description: len(backend/core/enums.py::Ticker). Not read from the DB.
+        total_articles:
+          type: integer
+        total_events:
+          type: integer
+        last_updated:
+          type: string
+          format: date-time
+          nullable: true
+          description: Newest event_clusters.updated_at. null when the DB is empty.
+
+    DashboardGauge:
+      type: object
+      required:
+        [window, market_score, is_empty, positive_count, neutral_count,
+         negative_count, scored_events, total_events_in_window]
       properties:
         window:
           type: string
           example: 24h
-        last_updated:
-          type: string
-          format: date-time
-        articles_count:
+        market_score:
+          type: number
+          format: float
+          minimum: -1.0
+          maximum: 1.0
+          description: >
+            0.0 when is_empty is true. Read is_empty before rendering — a 0.0
+            empty state and a genuinely neutral 0.0 must not look alike.
+        is_empty:
+          type: boolean
+          description: true if no scoreable event in the window.
+        positive_count:
           type: integer
-        events_count:
+        neutral_count:
           type: integer
-        gauge:
-          type: object
-          properties:
-            score:
-              $ref: '#/components/schemas/SentimentScore'
-            positive_count:
-              type: integer
-            neutral_count:
-              type: integer
-            negative_count:
-              type: integer
+        negative_count:
+          type: integer
+        scored_events:
+          type: integer
+          description: Events folded into market_score. Equals the three bucket counts summed.
+        total_events_in_window:
+          type: integer
+          description: >
+            All events in the window, including ones with no score yet. Use this
+            for "N events" copy — the bucket counts undercount it.
 
-    DashboardFeed:
+    DashboardEvents:
       type: object
+      required: [window, page, limit, has_more, events]
       properties:
-        sort:
-          type: string
-          enum: [ticker, event]
         window:
           type: string
         page:
           type: integer
+        limit:
+          type: integer
         has_more:
           type: boolean
-        items:
+        events:
           type: array
           items:
-            oneOf:
-              - $ref: '#/components/schemas/TickerFeedItem'
-              - $ref: '#/components/schemas/EventFeedItem'
+            $ref: '#/components/schemas/EventFeedItem'
+
+    DashboardTickers:
+      type: object
+      required: [window, page, limit, has_more, tickers]
+      properties:
+        window:
+          type: string
+        page:
+          type: integer
+        limit:
+          type: integer
+        has_more:
+          type: boolean
+        tickers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TickerFeedItem'
 
     TickerFeedItem:
       type: object
+      required: [rank, ticker, event_count, sentiment_score, is_empty]
       properties:
         rank:
           type: integer
+          description: Global 1-based rank, already offset by page.
         ticker:
           $ref: '#/components/schemas/Ticker'
-        company_name:
-          type: string
-          example: Hoa Phat Group
-          description: >
-            TODO: no ticker → company-name mapping currently exists in the
-            backend (backend/core/enums.py only defines symbols). Source this
-            before implementing the endpoint, or drop the field.
         event_count:
           type: integer
         sentiment_score:
-          $ref: '#/components/schemas/SentimentScore'
+          type: number
+          format: float
+          minimum: -1.0
+          maximum: 1.0
+        is_empty:
+          type: boolean
 
     EventFeedItem:
       type: object
+      required:
+        [rank, cluster_id, event_title, total_articles, sources, tickers_mentioned]
       properties:
         rank:
           type: integer
+          description: Global 1-based rank, already offset by page.
         cluster_id:
           type: string
         event_title:
           type: string
-        article_count:
+        total_articles:
           type: integer
         sources:
           type: object
+          additionalProperties:
+            type: integer
           description: >
-            Keyed by source name. Currently CafeF and VnExpress (see
-            backend/core/config.py::PipelineSettings.RSS_FEEDS) — add a source
-            here if a new one is registered in the scraper.
-          properties:
-            CafeF:
-              type: integer
-            VnExpress:
-              type: integer
-        tickers:
+            Article count keyed by source name, derived from
+            event_coverage.all_urls. Currently CafeF and VnExpress (see
+            backend/core/config.py::PipelineSettings.RSS_FEEDS) — a newly
+            registered scraper source appears here with no contract change.
+          example:
+            CafeF: 3
+            VnExpress: 1
+        tickers_mentioned:
           type: array
           items:
             $ref: '#/components/schemas/Ticker'
+          description: Filtered against the Ticker enum; unknown symbols are dropped.
 
     # ── Ticker Detail ──
 
-    TickerDetail:
+    TickerSentiment:
       type: object
+      required: [ticker, window, score, is_empty]
       properties:
         ticker:
           $ref: '#/components/schemas/Ticker'
-        company_name:
-          type: string
-          description: "TODO: see TickerFeedItem.company_name — same unresolved data source."
         window:
           type: string
-        sentiment_score:
-          $ref: '#/components/schemas/SentimentScore'
-        gauge:
-          type: object
-          properties:
-            score:
-              $ref: '#/components/schemas/SentimentScore'
-            positive_count:
-              type: integer
-            neutral_count:
-              type: integer
-            negative_count:
-              type: integer
-        is_empty_state:
+        score:
+          type: number
+          format: float
+          minimum: -1.0
+          maximum: 1.0
+          description: S_final. 0.0 when is_empty is true — see DashboardGauge.market_score.
+        is_empty:
           type: boolean
-          description: true if no valid events in window — UI shows neutral grey gauge
+          description: true if no valid events in window — UI shows neutral grey gauge.
 
     TickerHistory:
       type: object

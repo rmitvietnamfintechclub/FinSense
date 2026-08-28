@@ -106,3 +106,9 @@ def bucket_sentiment(score: float, threshold: float) -> str:
     if score < -threshold:
         return "negative"
     return "neutral"
+
+def clamp_score(score: float) -> float:
+    """Nothing in the pipeline enforces the [-1, 1] range on stored AI scores,
+    and the response models declare it — one out-of-bounds value would fail
+    validation for the whole payload instead of degrading a single card."""
+    return max(-1.0, min(1.0, score))
