@@ -109,10 +109,12 @@ stages/
     prompts/                   Versioned prompt files — never edit existing files
       v1.txt                     Self-contained; only placeholder is {article_text}
       v2.txt                     Composed at render time from docs/ + lexicon/
-      v3.txt                     Empty placeholder
+      v3.txt                     v2 plus worked few-shot examples in its rubrics
       docs/                    Model-facing rubrics substituted into v2+ — NOT prose about the code
-        SENTIMENT.md             Fills {sentiment_rubric}
-        AI_CONFIDENCE.md         Fills {confidence_rubric}
+        SENTIMENT_v2.md          Fills {sentiment_rubric} for v2 (examples unfilled, stripped)
+        SENTIMENT_v3.md          Fills {sentiment_rubric} for v3 (7 worked examples)
+        AI_CONFIDENCE_v2.md      Fills {confidence_rubric} for v2 (examples unfilled, stripped)
+        AI_CONFIDENCE_v3.md      Fills {confidence_rubric} for v3 (5 worked examples)
     stage.py                   Stage coordinator — run_extract()
   aggregate/                   Stage 5 — event-level aggregation
     event_aggregator.py        Confidence-weighted average across a cluster's sources
@@ -160,12 +162,14 @@ edit existing version files — they are the historical record, and
 `prompt_version` is stored on every `AIResponse` so evolutions stay comparable.
 
 From `v2` the template is a skeleton and the substance lives in files it pulls
-in at render time — `prompts/docs/SENTIMENT.md`, `prompts/docs/AI_CONFIDENCE.md`,
-`lexicon/vietnam_financial_lexicon.json`. Edit those to change the rules, which
-is the point of the split; but they are inputs to a stamped `prompt_version`, so
-**cut a new `vN.txt` after editing one** or older extractions stop being
-reproducible. `prompt_builder` needs changing only to add a *new* placeholder,
-never to add a lexicon term or reword a rubric.
+in at render time — `prompts/docs/SENTIMENT_<version>.md`,
+`prompts/docs/AI_CONFIDENCE_<version>.md`, `lexicon/vietnam_financial_lexicon.json`.
+The rubric docs are pinned to the prompt version **by filename**, so reworking one
+means copying it to the next suffix alongside a new `vN.txt` — never editing in
+place. The lexicon is shared across versions, so a term added there changes every
+composed prompt; cut a new `vN.txt` after touching it. `prompt_builder` needs
+changing only to add a *new* placeholder, never to add a lexicon term or reword a
+rubric.
 
 **Changing the model:** don't, mid-evolution. `model_version` is stored on every
 `AIResponse`. Swapping models between evolutions makes the deltas

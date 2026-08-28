@@ -46,7 +46,7 @@ class PipelineSettings(BaseSettings):
 
     # Extraction Settings
     EXTRACTION_TEMPERATURE: float = 0.0
-    PROMPT_VERSION: str = "v1"
+    PROMPT_VERSION: str = "v3"
     AI_CONFIDENCE_THRESHOLD: float = 0.5
 
 class APISettings(BaseSettings):

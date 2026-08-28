@@ -9,8 +9,10 @@ on a house average, or moves the number in response to prompt wording rather tha
 anything about the article.
 
 This document is the **design rationale**. Its model-facing counterpart is
-[`backend/pipeline/stages/extract/prompts/docs/AI_CONFIDENCE.md`](../../backend/pipeline/stages/extract/prompts/docs/AI_CONFIDENCE.md),
-which `prompt_builder` substitutes into prompt `v2` and later at render time. The two
+[`backend/pipeline/stages/extract/prompts/docs/AI_CONFIDENCE_v3.md`](../../backend/pipeline/stages/extract/prompts/docs/AI_CONFIDENCE_v3.md)
+(and `AI_CONFIDENCE_v2.md` for the version before worked examples were added), which
+`prompt_builder` substitutes into prompt `v2` and later at render time — pinned by
+filename, so each prompt version keeps the rubric it shipped with. The two
 are a matched pair: this one explains *why* the bands are where they are, that one
 tells the model what to do. **A band edit here is not live until the counterpart is
 edited too — and editing the counterpart requires cutting a new prompt version**, since

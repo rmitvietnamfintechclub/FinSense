@@ -29,8 +29,10 @@ def _strip_maintainer_notes(doc: str) -> str:
     return doc.rstrip() + "\n"
 
 @cache
-def _load_rubric(name: str) -> str:
-    path = _PROMPTS_DIR / "docs" / f"{name}.md"
+def _load_rubric(name: str, version: str) -> str:
+    """Rubric docs are versioned alongside the template that pulls them in, so a
+    reworded rule cannot retroactively change what an older prompt version sent."""
+    path = _PROMPTS_DIR / "docs" / f"{name}_{version}.md"
     return _strip_maintainer_notes(path.read_text(encoding="utf-8"))
 
 def _render_entry(term: str, fields: dict) -> str:
@@ -62,6 +64,6 @@ def build_prompt(article_text: str) -> tuple[str, str]:
         ("{confidence_rubric}", "AI_CONFIDENCE"),
     ):
         if placeholder in template:
-            template = template.replace(placeholder, _load_rubric(rubric))
+            template = template.replace(placeholder, _load_rubric(rubric, prompt_version))
 
     return template.replace("{article_text}", article_text), prompt_version

@@ -273,8 +273,8 @@ render time** from four sources:
 | Placeholder | Filled from |
 |---|---|
 | `{lexicon}` | `pipeline/lexicon/vietnam_financial_lexicon.json`, rendered to markdown bullets |
-| `{sentiment_rubric}` | `prompts/docs/SENTIMENT.md` |
-| `{confidence_rubric}` | `prompts/docs/AI_CONFIDENCE.md` |
+| `{sentiment_rubric}` | `prompts/docs/SENTIMENT_<version>.md` |
+| `{confidence_rubric}` | `prompts/docs/AI_CONFIDENCE_<version>.md` |
 | `{article_text}` | the scraped body |
 
 Each loader is cached for the process lifetime, like the template itself.

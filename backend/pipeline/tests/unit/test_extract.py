@@ -118,6 +118,25 @@ def test_prompt_version_comes_from_settings(monkeypatch, tmp_path):
     prompt_builder._load_template.cache_clear()
 
 
+@pytest.mark.parametrize("version", ["v2", "v3"])
+def test_composed_versions_fill_every_placeholder(monkeypatch, version):
+    """v2 and v3 both pull their three reference sections from files. Guards the
+    placeholder contract: a renamed placeholder would ship a prompt with a literal
+    `{sentiment_rubric}` in it and no rubric at all."""
+    monkeypatch.setattr(prompt_builder.pipeline_settings, "PROMPT_VERSION", version, raising=False)
+    prompt, returned = build_prompt("NOI DUNG BAI BAO")
+
+    assert returned == version
+    references, _, article = prompt.partition("Article:\n")
+    for placeholder in ("{lexicon}", "{sentiment_rubric}", "{confidence_rubric}", "{article_text}"):
+        assert placeholder not in references
+    assert article.strip() == "NOI DUNG BAI BAO"
+
+    assert "n\u1ee3 x\u1ea5u" in references          # from the lexicon JSON
+    assert "strongly_negative" in references           # from SENTIMENT_<version>.md
+    assert "unusable" in references                    # from AI_CONFIDENCE_<version>.md
+
+
 def test_v2_composes_rubrics_and_lexicon(monkeypatch):
     """v2 pulls its three reference sections from files. Guards the placeholder
     contract: a renamed placeholder would ship a prompt with a literal
@@ -147,12 +166,36 @@ def test_article_text_cannot_inject_a_reference_section(monkeypatch):
 
 
 def test_maintainer_notes_are_stripped_from_rubrics():
-    """The rubric docs carry an HTML note to the maintainer and unfilled example
+    """The v2 rubric docs carry an HTML note to the maintainer and unfilled example
     slots. Neither is addressed to the model."""
     for name in ("SENTIMENT", "AI_CONFIDENCE"):
-        rubric = prompt_builder._load_rubric(name)
+        rubric = prompt_builder._load_rubric(name, "v2")
         assert "<!--" not in rubric
         assert "example pending real data" not in rubric
+        assert "## Examples" not in rubric
+
+
+def test_v3_rubrics_carry_worked_examples():
+    """v3's whole purpose is the few-shot examples. If the strip heuristic ever
+    swallowed them, v3 would silently degrade into v2 with no test failure."""
+    for name in ("SENTIMENT", "AI_CONFIDENCE"):
+        rubric = prompt_builder._load_rubric(name, "v3")
+        assert "## Examples" in rubric
+        assert "example pending real data" not in rubric
+        assert "<!--" not in rubric
+        assert "evt_" in rubric          # every example cites a real cluster_id
+
+
+def test_rubric_docs_are_pinned_per_prompt_version(monkeypatch):
+    """Each prompt version loads its own rubric files. Without this, editing a
+    rubric would retroactively change what an older prompt_version sent."""
+    monkeypatch.setattr(prompt_builder.pipeline_settings, "PROMPT_VERSION", "v3", raising=False)
+    v3_prompt, _ = build_prompt("x")
+    monkeypatch.setattr(prompt_builder.pipeline_settings, "PROMPT_VERSION", "v2", raising=False)
+    v2_prompt, _ = build_prompt("x")
+
+    assert "## Examples" in v3_prompt
+    assert "## Examples" not in v2_prompt
 
 
 def test_missing_template_is_a_handled_failure(monkeypatch, tmp_path):

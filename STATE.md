@@ -7,7 +7,7 @@ evidence a feature exists.
 Architecture lives in `CLAUDE.md`, the pipeline's internals in `docs/PIPELINE.md`. This file only
 tracks *what works right now*.
 
-**Last verified: 2026-08-25.** Re-verify before trusting anything below if the date is stale:
+**Last verified: 2026-08-28.** Re-verify before trusting anything below if the date is stale:
 
 ```shell
 uv run --extra dev python -m pytest -q                  # suite health
@@ -20,6 +20,8 @@ find . -path ./.venv -prune -o -name '*.py' -size -1c -print   # find the empty 
 | Component | Status |
 |---|---|
 | Pipeline `rss → cluster → scraper → extract → aggregate` | **Verified end to end on live data** |
+| Extract prompt `v1` | Active (`PROMPT_VERSION` default); no defined sentiment or confidence scale |
+| Extract prompts `v2`, `v3` | Written, composed, unit-tested — **never sent to Gemini**; not switched on |
 | EOD batch (`pipeline/eod_batch/`) + VNDirect price adapter | Reviewed and hardened 2026-08-25; suite green, **never run against real data** |
 | API — ticker + dashboard features | Implemented and runnable; routes smoke-tested, **never run against real Atlas data** |
 | API — auth, audit, events, history, internal | Empty files, routers commented out in `main.py` |
@@ -39,19 +41,33 @@ A full run over a live 109-article feed snapshot (2026-08-23), after the round-t
 | AGGREGATE | 3.7s | |
 | **Total** | **38.3s** | down from 571.3s before the round-trip work |
 
-Current dev database (`FinSense_dev`): 109 articles, 78 event_clusters, 30 daily_sentiment_history.
-**Those 78 clusters have zero extractions and cannot currently be completed** — see the resume gap
-below.
+(That run is a 2026-08-23 snapshot, kept because it is the only full end-to-end timing on record.
+The database has grown since — the numbers below are current.)
+
+Current dev database (`FinSense_dev`), as of 2026-08-28: **218 articles, 175 event_clusters, 30
+daily_sentiment_history, 0 audit_log**, with `created_at` spanning 2026-08-23 → 2026-08-28.
+
+**Extraction coverage is negligible: 6 of 175 clusters carry any `ai_response` at all, and only 3
+have a non-empty aggregated ticker list.** The other 169 were clustered and scraped but never
+extracted — the Gemini quota stops the stage almost immediately, and the resume gap below means a
+later run does not pick them up. 162 clusters do hold real `content_fed_to_ai` bodies, which is
+what the `v3` prompt examples were sourced from.
 
 ## Health
 
-- **Test suite: 15 failing, 227 passing, 10 skipped.** One cause, all in `test_dashboard.py`:
+- **Test suite: 15 failing, 234 passing, 10 skipped** (on `admin/prompt_builder`). One cause, all
+  in `test_dashboard.py`:
   they monkeypatch `dashboard.service.get_database` and call the services synchronously. The module
   is async + injected-`db` and has moved further since (pagination, `rank`, `sources` counts), so
   the whole file needs rewriting, not patching. All four dashboard endpoints are untested.
 - **`ruff check backend/` is clean.** CI only runs ruff, so this is the gate that matters.
 - `test_eod_batch.py` and `test_price_adapter.py` are fully green (57 tests). The former no longer
   uses mongomock for `daily_sentiment_history` — see `FakeHistoryCollection`.
+- `test_extract.py` is green (38 tests) and now covers prompt composition: that every placeholder in
+  `v2`/`v3` is filled, that `article_text` is substituted last so a scraped body cannot inject a
+  reference section, that maintainer notes are stripped, and that `v2` and `v3` load *different*
+  rubric files. That last one matters — without it a regression in the strip heuristic would
+  silently turn `v3` back into `v2` with no failure.
 - No test execution in CI at all; `ci.yml` runs ruff and nothing else.
 
 ## Known broken / blocked
@@ -100,6 +116,16 @@ below.
 
 Not bugs — unresolved calibration, flagged by the live runs.
 
+- **The `v3` example scores are unvalidated judgements.** The article text in every worked example
+  is real and cited, but the score attached to each was reasoned from the rubric, not human-labelled.
+  Once `v3` is live those numbers become the de-facto specification. The neutral (a) / (c) split —
+  measured small lean vs. undeterminable direction — is the distinction carrying the most weight and
+  the one most worth a second reader.
+- **No way to tell whether `v2`/`v3` actually help.** `EXTRACTION_TEMPERATURE` is ignored by
+  `gemini-3.6-flash`, so repeated runs disagree with themselves. A small-sample `v1`-vs-`v3`
+  comparison cannot separate a prompt effect from sampling noise, and there is no evaluation harness
+  and no frozen test set to do it properly.
+
 - **The clustering threshold was calibrated on the wrong text.** `CLUSTERING_THRESHOLD.md` tuned
   0.91 against *headlines only*; production embeds title + summary, which shifts similarities up
   ~0.01 and makes ~40% more pairs merge-eligible. Re-run the sweep on title+summary.
@@ -108,11 +134,17 @@ Not bugs — unresolved calibration, flagged by the live runs.
   clusters with a 56-article blob; 0.86 gives 4. Do not lower it casually.
 - **Topic chaining over-merges.** One run produced a 12-article "VN-Index" cluster and a 10-article
   "gold price" cluster, each spanning several distinct events.
-- **Prompt `v2` is written but not switched on.** `PROMPT_VERSION` still defaults to `v1`, so the
-  rubrics and lexicon `v2` composes are not reaching the model yet. Nothing below has been re-measured
-  against `v2`; every symptom in this section was observed under `v1`.
-- **`v2` costs roughly 10k tokens of fixed preamble per article** against roughly 200 for `v1`, and
-  `client.py` requests no explicit prompt caching. Budget for that before switching a scheduled run.
+- **Prompts `v2` and `v3` are written but not switched on.** `PROMPT_VERSION` still defaults to
+  `v1`, so neither the rubrics, the lexicon, nor `v3`'s worked examples are reaching the model yet.
+  Nothing below has been re-measured against either; every symptom in this section was observed
+  under `v1`.
+- **Fixed preamble cost per article**: `v1` ~200 tokens, `v2` ~10.3k, `v3` ~17k, sent on every
+  article. `client.py` requests no explicit prompt caching. Budget for that before switching a
+  scheduled run — at ~80 calls on a cold start, `v3` is ~1.4M input tokens per run.
+- **`v3`'s `strongly_negative` band has no worked in-vocabulary example.** The corpus it was built
+  from (2026-08-23 → 08-28) contains no severe adverse event with a covered ticker as primary
+  subject; the slot is filled with a real out-of-vocabulary case (Lộc Trời delisting) that teaches
+  the band criteria and the empty-list rule instead. Add a proper one when the corpus has one.
 - **Extraction quality is unrefined** (measured under `v1`, whose prompt defines neither scale):
   articles listing many tickers get
   ~0.5 assigned to all of them; unrelated tickers come back as exactly `0.0`, which renders as
@@ -140,11 +172,8 @@ Seeded ahead of implementation, all 0 bytes:
 - `backend/core/exception.py` — no shared exception hierarchy; error handling is ad hoc per module.
 - `backend/api/tests/conftest.py` — `backend.*` imports resolve only because `uv sync` installs the
   project editable into `.venv`. Run API tests through `uv run`.
-- Prompt `v3.txt`. `v2.txt` was implemented on 2026-08-28: v1 plus three reference sections
-  composed at render time by `prompt_builder` — `prompts/docs/SENTIMENT.md`,
-  `prompts/docs/AI_CONFIDENCE.md`, and `lexicon/vietnam_financial_lexicon.json`. Editing those
-  files changes what v2 sends, so a rubric or lexicon edit needs a new prompt version to keep
-  evolution deltas comparable. `PROMPT_VERSION` still defaults to `v1`.
+- *(nothing left in this list from the prompts folder — `v2.txt` and `v3.txt` are both
+  implemented as of 2026-08-28.)*
 
 ## Documentation drift
 
@@ -160,12 +189,18 @@ Ordered by what unblocks the most:
 
 1. Throttle the scraper — you lose real articles every run and it worsens with each one.
 2. Resolve which Gemini limit you're hitting, from the quota dashboard. That decides whether the
-   answer is retries/backoff or a paid tier.
-3. Run the API against a seeded Atlas dev database — every endpoint so far is fake-collection only.
-4. Give `schedule-pipeline.yml` content. The EOD rollup is scheduled ahead of the thing it rolls up.
-5. Close the resume gap in `run_pipeline` so a stopped run can be continued without a reset.
-6. Rewrite `test_dashboard.py` against the async + DI services, then add a test job to CI so it can't rot again.
-7. Batch the EOD price fetch — 30 sequential requests per night where VNDirect's `q` accepts a
+   answer is retries/backoff or a paid tier. This also gates the prompt work: `v3` sends ~17k tokens
+   per article, so if the ceiling is TPM rather than RPM, switching to it makes extraction *worse*.
+3. Switch `PROMPT_VERSION` to `v3` and run it once against real clusters — it has never reached the
+   model. Everything verified so far is string composition.
+4. Run the API against a seeded Atlas dev database — every endpoint so far is fake-collection only.
+5. Give `schedule-pipeline.yml` content. The EOD rollup is scheduled ahead of the thing it rolls up.
+6. Close the resume gap in `run_pipeline` so a stopped run can be continued without a reset.
+7. Rewrite `test_dashboard.py` against the async + DI services, then add a test job to CI so it can't rot again.
+8. Batch the EOD price fetch — 30 sequential requests per night where VNDirect's `q` accepts a
    comma-separated code list. Also worth a projection on the day's `find()` and a single pass in
    `_collect_ticker_scores` instead of one per ticker.
-8. Populate the ADRs — the decisions are named but never justified in-repo.
+9. Populate the ADRs — the decisions are named but never justified in-repo.
+10. Harvest a real `strongly_negative` example with a *covered* ticker as primary subject, and fill
+    the gap in `SENTIMENT_v3.md` (cut a `v4` to do it — the rubric docs are pinned per version).
+    Nothing in the 2026-08-23 → 08-28 corpus qualifies.
