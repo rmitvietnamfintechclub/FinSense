@@ -572,12 +572,9 @@ components:
         company_name:
           type: string
           description: >
-            Sourced from backend/core/ticker_metadata.py (FS-39) — resolves the
+            display_name from backend/core/ticker_metadata.py — resolves the
             TODO that used to sit here (see TickerFeedItem.company_name, still
             open for the dashboard feed).
-        sector:
-          $ref: '#/components/schemas/Concept'
-          description: Primary sector, from ticker_metadata.py (FS-39)
         window:
           type: string
         sentiment_score:

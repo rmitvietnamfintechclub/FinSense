@@ -9,14 +9,14 @@ dashboard/service.py::get_tickers() already uses — never recomputed here.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 
 from backend.api.features.ticker.aggregator import (
-    _fetch_events,
     assemble_live_sentiment,
     compute_live_sentiment,
+    fetch_events,
 )
 from backend.api.features.ticker.schemas import (
     GaugeBreakdown,
@@ -31,7 +31,11 @@ from backend.api.features.ticker.schemas import (
 from backend.core.config import APISettings, api_settings, pipeline_settings
 from backend.core.formulas import bucket_sentiment
 from backend.core.lexicon import get_concept_weights
-from backend.core.ticker_metadata import get_ticker_metadata
+from backend.core.ticker_metadata import get_ticker_dictionary
+
+# The API must not import from backend.pipeline, so the ICT offset the EOD
+# batch uses for day boundaries is restated here rather than shared.
+_ICT = timezone(timedelta(hours=7))
 
 EVENT_CLUSTERS_COLLECTION = "event_clusters"
 DAILY_SENTIMENT_HISTORY_COLLECTION = "daily_sentiment_history"
@@ -39,6 +43,10 @@ DAILY_SENTIMENT_HISTORY_COLLECTION = "daily_sentiment_history"
 
 async def get_ticker_sentiment(collection: AsyncIOMotorCollection, ticker: str, window: str) -> TickerSentimentResponse:
     result = await compute_live_sentiment(collection, ticker=ticker, window=window)
+    # null, not 0.0, on the empty state — 0.0 is a legitimate neutral score and a
+    # client that forgets to read is_empty would render 'no data' as 'neutral'.
+    if result["is_empty"]:
+        result = {**result, "score": None}
     return TickerSentimentResponse(**result)
 
 
@@ -63,7 +71,7 @@ async def get_ticker_detail(
     concept_weights = get_concept_weights(symbol)
     # Same fetch dashboard/get_tickers relies on via assemble_live_sentiment —
     # ticker OR concept matches, because S_final blends both.
-    events = await _fetch_events(
+    events = await fetch_events(
         symbol, list(concept_weights), window_start, db[EVENT_CLUSTERS_COLLECTION]
     )
     result = assemble_live_sentiment(symbol, events, concept_weights, lambda_, now)
@@ -77,7 +85,7 @@ async def get_ticker_detail(
         for e in events
         if any(
             ts.get("ticker") == symbol
-            for ts in (e.get("aggregated_analysis") or {}).get("ticker_sentiments", [])
+            for ts in (e.get("aggregated_analysis") or {}).get("ticker_sentiments") or []
         )
     ]
 
@@ -87,7 +95,7 @@ async def get_ticker_detail(
         ts_score = next(
             (
                 ts.get("score")
-                for ts in (event.get("aggregated_analysis") or {}).get("ticker_sentiments", [])
+                for ts in (event.get("aggregated_analysis") or {}).get("ticker_sentiments") or []
                 if ts.get("ticker") == symbol and ts.get("score") is not None
             ),
             None,
@@ -95,15 +103,14 @@ async def get_ticker_detail(
         if ts_score is not None:
             buckets[bucket_sentiment(ts_score, threshold)] += 1
 
-    article_count = sum((e.get("event_coverage") or {}).get("total_articles", 0) for e in own_events)
+    article_count = sum((e.get("event_coverage") or {}).get("total_articles") or 0 for e in own_events)
     last_updated = max((e["updated_at"] for e in own_events), default=None)
 
-    metadata = get_ticker_metadata()[symbol]
+    metadata = get_ticker_dictionary()[symbol]
 
     return TickerDetail(
         ticker=symbol,
         company_name=metadata.display_name,
-        sector=metadata.sector.value,
         window=window,
         sentiment_score=score,
         gauge=GaugeBreakdown(
@@ -127,13 +134,25 @@ async def get_ticker_detail(
 async def get_ticker_history(db: AsyncIOMotorDatabase, symbol: str, days: int) -> TickerHistory:
     """Reads daily_sentiment_history ONLY — pre-computed by the EOD batch job,
     zero live computation here. Nulls pass through untouched: no interpolation,
-    no gap-filling, ever."""
+    no gap-filling, ever.
+
+    `days` is a calendar window, not a row count. Limiting to the newest N rows
+    would silently reach further back the more non-trading days the range holds
+    — 30 rows of a weekday-only series spans about six calendar weeks — so a
+    '30 day' chart would not cover 30 days. Filtering on the date instead means
+    the response is at most `days` long and gaps stay gaps."""
     collection = db[DAILY_SENTIMENT_HISTORY_COLLECTION]
-    # date is a zero-padded 'YYYY-MM-DD' string, so lexicographic sort == chronological.
-    # Take the most recent `days` rows, then reverse to oldest -> newest for the response.
-    cursor = collection.find({"ticker": symbol}).sort("date", -1).limit(days)
+    # Window boundary is ICT, matching how the EOD batch assigns a row its date.
+    today_ict = datetime.now(UTC).astimezone(_ICT).date()
+    start_date = today_ict - timedelta(days=days - 1)  # inclusive of today
+
+    # date is a zero-padded 'YYYY-MM-DD' string, so lexicographic compare ==
+    # chronological compare, and $gte works directly on it.
+    cursor = (
+        collection.find({"ticker": symbol, "date": {"$gte": start_date.isoformat()}})
+        .sort("date", 1)
+    )
     rows = await cursor.to_list(length=days)
-    rows.reverse()
 
     data = [
         TickerHistoryRow(
@@ -155,7 +174,7 @@ def _event_ticker_score(analysis: dict, symbol: str) -> float | None:
     return next(
         (
             ts.get("score")
-            for ts in analysis.get("ticker_sentiments", [])
+            for ts in analysis.get("ticker_sentiments") or []
             if ts.get("ticker") == symbol
         ),
         None,
@@ -167,7 +186,7 @@ def _source_breakdown_for_event(event: dict, symbol: str, threshold: float) -> l
     articles still has exactly 1 representative ai_response). Sub-threshold
     sources are excluded entirely, not shown with a greyed-out score."""
     rows: list[TickerEventSourceBreakdown] = []
-    for source in event.get("source_breakdown", []):
+    for source in event.get("source_breakdown") or []:
         ai_response = source.get("ai_response") or {}
         confidence = ai_response.get("ai_confidence")
         if confidence is None or confidence < threshold:
@@ -176,7 +195,7 @@ def _source_breakdown_for_event(event: dict, symbol: str, threshold: float) -> l
         source_score = next(
             (
                 ts.get("score")
-                for ts in ai_response.get("ticker_sentiments", [])
+                for ts in ai_response.get("ticker_sentiments") or []
                 if ts.get("ticker") == symbol
             ),
             None,
@@ -187,12 +206,12 @@ def _source_breakdown_for_event(event: dict, symbol: str, threshold: float) -> l
         representative_article = source.get("representative_article") or {}
         rows.append(
             TickerEventSourceBreakdown(
-                source=source.get("source", ""),
+                source=source.get("source") or "",
                 score=source_score,
                 # See TickerEventSourceBreakdown.article_title docstring — no
                 # per-article title persisted yet, event_title is the closest stand-in.
-                article_title=event.get("event_title", ""),
-                article_url=representative_article.get("url", ""),
+                article_title=event.get("event_title") or "",
+                article_url=representative_article.get("url") or "",
             )
         )
     return rows
@@ -201,10 +220,10 @@ def _source_breakdown_for_event(event: dict, symbol: str, threshold: float) -> l
 def _build_event_item(event: dict, symbol: str, threshold: float) -> TickerEventItem:
     analysis = event.get("aggregated_analysis") or {}
     return TickerEventItem(
-        cluster_id=event.get("cluster_id", ""),
-        event_title=event.get("event_title", ""),
+        cluster_id=event.get("cluster_id") or "",
+        event_title=event.get("event_title") or "",
         created_at=event["created_at"],
-        article_count=(event.get("event_coverage") or {}).get("total_articles", 0),
+        article_count=(event.get("event_coverage") or {}).get("total_articles") or 0,
         sentiment_score=_event_ticker_score(analysis, symbol),
         source_breakdown=_source_breakdown_for_event(event, symbol, threshold),
     )

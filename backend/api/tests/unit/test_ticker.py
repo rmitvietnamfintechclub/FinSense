@@ -25,7 +25,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from backend.api.features.dashboard import service as dashboard_svc
-from backend.api.features.ticker import aggregator, service as svc
+from backend.api.features.ticker import aggregator
+from backend.api.features.ticker import service as svc
 from backend.api.features.ticker.router import db_dep, router, valid_symbol
 from backend.api.features.ticker.schemas import (
     GaugeBreakdown,
@@ -40,6 +41,12 @@ from backend.core.config import api_settings, pipeline_settings
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 OPENAPI_PATH = REPO_ROOT / "docs" / "openapi.yaml"
+
+
+# The service windows history on ICT dates; a UTC "today" would disagree with it
+# for seven hours a day and make these tests flaky near midnight.
+def _today_ict():
+    return datetime.now(svc._ICT).date()
 
 
 def run(coro):
@@ -60,6 +67,12 @@ class FakeCursor:
 
     def sort(self, *args, **kwargs):
         self.sort_calls.append(args or kwargs)
+        # Ordering is part of the contract under test (the history window relies
+        # on it), so actually sort rather than trusting hand-ordered fixtures.
+        if args and isinstance(args[0], str):
+            field = args[0]
+            direction = args[1] if len(args) > 1 else 1
+            self._items.sort(key=lambda d: d.get(field), reverse=direction < 0)
         return self
 
     def skip(self, n: int):
@@ -86,7 +99,11 @@ class FakeCollection:
     def find(self, query=None, **kwargs):
         self.find_call_count += 1
         self.last_query = query
-        self.last_cursor = FakeCursor(self.items)
+        items = self.items
+        date_filter = (query or {}).get("date")
+        if isinstance(date_filter, dict) and "$gte" in date_filter:
+            items = [d for d in items if d.get("date") >= date_filter["$gte"]]
+        self.last_cursor = FakeCursor(items)
         return self.last_cursor
 
 
@@ -250,12 +267,11 @@ class TestGetTickerDetail:
         result = run(svc.get_ticker_detail(fake_db, symbol="HPG", window="24h"))
         assert result.last_updated == newer["updated_at"]
 
-    def test_company_name_and_sector_come_from_ticker_metadata(self):
+    def test_company_name_comes_from_ticker_metadata(self):
         now = datetime.now(UTC)
         fake_db = {"event_clusters": FakeCollection([make_event(updated_at=now)])}
         result = run(svc.get_ticker_detail(fake_db, symbol="HPG", window="24h"))
         assert result.company_name == "Hoa Phat Group"
-        assert result.sector == "MATERIALS"
 
     def test_gauge_buckets_only_count_the_tickers_own_valid_scores(self):
         threshold = api_settings.SENTIMENT_BUCKET_THRESHOLD
@@ -319,12 +335,12 @@ class TestGetTickerDetail:
 class TestTickerDetailRouter:
     def test_unknown_symbol_returns_404(self):
         client = make_client({"event_clusters": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/ZZZ")
+        resp = client.get("/api/ticker/ZZZ")
         assert resp.status_code == 404
 
     def test_known_ticker_with_no_events_returns_200_with_empty_state(self):
         client = make_client({"event_clusters": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/HPG")
+        resp = client.get("/api/ticker/HPG")
         assert resp.status_code == 200
         body = resp.json()
         assert body["is_empty_state"] is True
@@ -332,7 +348,7 @@ class TestTickerDetailRouter:
 
     def test_lowercase_symbol_is_accepted(self):
         client = make_client({"event_clusters": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/hpg")
+        resp = client.get("/api/ticker/hpg")
         assert resp.status_code == 200
         assert resp.json()["ticker"] == "HPG"
 
@@ -345,23 +361,23 @@ class TestTickerDetailRouter:
 class TestGetTickerHistory:
     @pytest.mark.parametrize("days", [7, 30, 90])
     def test_all_three_ranges_work(self, days):
-        rows = [{"ticker": "HPG", "date": "2026-08-01", "daily_sentiment_score": 0.1, "closing_price": 100.0}]
+        today = _today_ict().isoformat()
+        rows = [{"ticker": "HPG", "date": today, "daily_sentiment_score": 0.1, "closing_price": 100.0}]
         fake_db = {"daily_sentiment_history": FakeCollection(rows)}
         result = run(svc.get_ticker_history(fake_db, symbol="HPG", days=days))
         assert result.days == days
         assert len(result.data) == 1
 
     def test_rows_ordered_oldest_to_newest(self):
-        # Mongo would hand these back sorted descending (.sort("date", -1)) —
-        # the FakeCursor's sort() is a no-op, so we hand it pre-sorted like
-        # the real driver would, and assert the service reverses it.
-        newest_first = [
+        # Deliberately unsorted: FakeCursor.sort() honours the service's own
+        # .sort("date", 1), so this asserts the query's ordering, not the fixture's.
+        shuffled = [
             {"ticker": "HPG", "date": "2026-08-03", "daily_sentiment_score": 0.3, "closing_price": 103.0},
             {"ticker": "HPG", "date": "2026-08-02", "daily_sentiment_score": 0.2, "closing_price": 102.0},
             {"ticker": "HPG", "date": "2026-08-01", "daily_sentiment_score": 0.1, "closing_price": 101.0},
         ]
-        fake_db = {"daily_sentiment_history": FakeCollection(newest_first)}
-        result = run(svc.get_ticker_history(fake_db, symbol="HPG", days=30))
+        fake_db = {"daily_sentiment_history": FakeCollection(shuffled)}
+        result = run(svc.get_ticker_history(fake_db, symbol="HPG", days=36500))
         assert [row.date for row in result.data] == ["2026-08-01", "2026-08-02", "2026-08-03"]
 
     def test_nulls_pass_through_untouched_no_interpolation(self):
@@ -372,25 +388,61 @@ class TestGetTickerHistory:
             {"ticker": "HPG", "date": "2026-08-01", "daily_sentiment_score": 0.1, "closing_price": 100.0},
         ]
         fake_db = {"daily_sentiment_history": FakeCollection(rows)}
-        result = run(svc.get_ticker_history(fake_db, symbol="HPG", days=7))
+        result = run(svc.get_ticker_history(fake_db, symbol="HPG", days=36500))
         assert len(result.data) == 3  # no rows dropped, no rows synthesized
         assert result.data[1].daily_sentiment_score is None
         assert result.data[1].closing_price is None
         assert result.data[2].daily_sentiment_score == 0.3
         assert result.data[2].closing_price is None  # a null field next to a non-null one — not filled in
 
-    def test_more_rows_available_than_requested_keeps_the_most_recent_not_the_oldest(self):
-        """Classic off-by-one spot: sort ascending + take first N would
-        silently return the OLDEST N days instead of the most recent N."""
-        ten_days_newest_first = [
-            {"ticker": "HPG", "date": f"2026-08-{10 - i:02d}", "daily_sentiment_score": 0.1 * i, "closing_price": 100 + i}
+    def test_window_is_calendar_days_not_row_count(self):
+        """`days` must be a calendar window. Limiting to the newest N *rows*
+        reaches further back the more non-trading days the range contains — a
+        weekday-only series would make days=7 span 9-10 calendar days."""
+        today = _today_ict()
+        # 10 consecutive calendar days ending today, so 3 fall outside a 7-day window.
+        rows = [
+            {
+                "ticker": "HPG",
+                "date": (today - timedelta(days=i)).isoformat(),
+                "daily_sentiment_score": 0.1,
+                "closing_price": 100.0,
+            }
             for i in range(10)
         ]
-        fake_db = {"daily_sentiment_history": FakeCollection(ten_days_newest_first)}
+        fake_db = {"daily_sentiment_history": FakeCollection(rows)}
         result = run(svc.get_ticker_history(fake_db, symbol="HPG", days=7))
-        assert [row.date for row in result.data] == [
-            "2026-08-04", "2026-08-05", "2026-08-06", "2026-08-07", "2026-08-08", "2026-08-09", "2026-08-10",
+
+        expected = [(today - timedelta(days=i)).isoformat() for i in range(6, -1, -1)]
+        assert [row.date for row in result.data] == expected
+
+    def test_gaps_in_the_window_stay_gaps_and_are_never_filled(self):
+        """A weekend or holiday simply has no row. The response is shorter than
+        `days` — it must not be padded, and must not silently reach further back
+        to make up the count."""
+        today = _today_ict()
+        present = [0, 1, 4, 5, 6]  # days 2 and 3 missing, as a weekend would be
+        rows = [
+            {
+                "ticker": "HPG",
+                "date": (today - timedelta(days=i)).isoformat(),
+                "daily_sentiment_score": 0.1,
+                "closing_price": 100.0,
+            }
+            for i in present
         ]
+        # Older rows that a row-count limit would wrongly pull in to reach 7.
+        rows += [
+            {"ticker": "HPG", "date": (today - timedelta(days=i)).isoformat(),
+             "daily_sentiment_score": 0.9, "closing_price": 99.0}
+            for i in (8, 9)
+        ]
+        fake_db = {"daily_sentiment_history": FakeCollection(rows)}
+        result = run(svc.get_ticker_history(fake_db, symbol="HPG", days=7))
+
+        assert len(result.data) == len(present)  # 5, not padded up to 7
+        oldest_allowed = (today - timedelta(days=6)).isoformat()
+        assert all(row.date >= oldest_allowed for row in result.data)
 
     def test_query_is_scoped_to_the_requested_ticker_only(self):
         """A history collection holds rows for all 30 tickers — the query
@@ -398,7 +450,10 @@ class TestGetTickerHistory:
         history_collection = FakeCollection([{"ticker": "HPG", "date": "2026-08-01", "daily_sentiment_score": 0.1, "closing_price": 100.0}])
         fake_db = {"daily_sentiment_history": history_collection}
         run(svc.get_ticker_history(fake_db, symbol="HPG", days=30))
-        assert history_collection.last_query == {"ticker": "HPG"}
+        # The date window rides along in the same query — both halves must be
+        # server-side, never a client-side filter over the whole collection.
+        assert history_collection.last_query["ticker"] == "HPG"
+        assert "$gte" in history_collection.last_query["date"]
 
     def test_fewer_available_days_than_requested_is_a_partial_array_not_an_error(self):
         rows = [
@@ -406,7 +461,7 @@ class TestGetTickerHistory:
             {"ticker": "HPG", "date": "2026-08-02", "daily_sentiment_score": 0.2, "closing_price": 101.0},
         ]
         client = make_client({"daily_sentiment_history": FakeCollection(rows)})
-        resp = client.get("/api/v1/ticker/HPG/history", params={"days": 90})
+        resp = client.get("/api/ticker/HPG/history", params={"days": 90})
         assert resp.status_code == 200
         body = resp.json()
         assert body["days"] == 90
@@ -414,7 +469,7 @@ class TestGetTickerHistory:
 
     def test_unknown_symbol_returns_404(self):
         client = make_client({"daily_sentiment_history": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/ZZZ/history")
+        resp = client.get("/api/ticker/ZZZ/history")
         assert resp.status_code == 404
 
     def test_response_matches_ticker_history_schema_in_openapi(self):
@@ -612,12 +667,12 @@ class TestGetTickerEvents:
 class TestTickerEventsRouter:
     def test_unknown_symbol_returns_404(self):
         client = make_client({"event_clusters": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/ZZZ/events")
+        resp = client.get("/api/ticker/ZZZ/events")
         assert resp.status_code == 404
 
     def test_no_events_returns_200_with_empty_array(self):
         client = make_client({"event_clusters": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/HPG/events")
+        resp = client.get("/api/ticker/HPG/events")
         assert resp.status_code == 200
         assert resp.json()["items"] == []
 
@@ -646,7 +701,7 @@ class TestValidSymbol:
 class TestValidationErrors:
     def test_invalid_window_on_detail_is_422_not_500(self):
         client = make_client({"event_clusters": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/HPG", params={"window": "99h"})
+        resp = client.get("/api/ticker/HPG", params={"window": "99h"})
         assert resp.status_code == 422
 
     def test_events_endpoint_has_no_window_param_extra_query_arg_is_ignored(self):
@@ -656,30 +711,30 @@ class TestValidationErrors:
         must not error (FastAPI ignores unknown query params by default)."""
         now = datetime.now(UTC)
         client = make_client({"event_clusters": FakeCollection([make_event(updated_at=now)])})
-        resp = client.get("/api/v1/ticker/HPG/events", params={"window": "1w"})
+        resp = client.get("/api/ticker/HPG/events", params={"window": "1w"})
         assert resp.status_code == 200
         assert "window" not in resp.json()
 
     def test_invalid_days_is_422_not_silently_clamped(self):
         client = make_client({"daily_sentiment_history": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/HPG/history", params={"days": 15})
+        resp = client.get("/api/ticker/HPG/history", params={"days": 15})
         assert resp.status_code == 422
 
     @pytest.mark.parametrize("page", [0, -1])
     def test_non_positive_page_is_422(self, page):
         client = make_client({"event_clusters": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/HPG/events", params={"page": page})
+        resp = client.get("/api/ticker/HPG/events", params={"page": page})
         assert resp.status_code == 422
 
     def test_omitted_window_falls_back_to_default_not_an_error(self):
         client = make_client({"event_clusters": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/HPG")
+        resp = client.get("/api/ticker/HPG")
         assert resp.status_code == 200
         assert resp.json()["window"] == api_settings.DEFAULT_WINDOW
 
     def test_symbol_with_stray_characters_is_404_not_500(self):
         client = make_client({"event_clusters": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/HPG!")
+        resp = client.get("/api/ticker/HPG!")
         assert resp.status_code == 404
 
 
@@ -688,7 +743,7 @@ class TestPaginationExtremes:
         now = datetime.now(UTC)
         fake_db = {"event_clusters": FakeCollection([make_event(updated_at=now)])}
         client = make_client(fake_db)
-        resp = client.get("/api/v1/ticker/HPG/events", params={"page": 999})
+        resp = client.get("/api/ticker/HPG/events", params={"page": 999})
         assert resp.status_code == 200
         body = resp.json()
         assert body["items"] == []
@@ -741,7 +796,6 @@ class TestMalformedDocumentsDoNotCrash:
             fake_db = {"event_clusters": FakeCollection([])}
             result = run(svc.get_ticker_detail(fake_db, symbol=ticker.value, window="24h"))
             assert result.company_name
-            assert result.sector
 
 
 class TestNoAuthRequired:
@@ -751,13 +805,13 @@ class TestNoAuthRequired:
 
     def test_request_with_no_authorization_header_still_succeeds(self):
         client = make_client({"event_clusters": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/HPG")
+        resp = client.get("/api/ticker/HPG")
         assert resp.status_code != 401
         assert resp.status_code == 200
 
     def test_request_with_garbage_authorization_header_is_still_ignored(self):
         client = make_client({"event_clusters": FakeCollection([])})
-        resp = client.get("/api/v1/ticker/HPG", headers={"Authorization": "Bearer not-a-real-token"})
+        resp = client.get("/api/ticker/HPG", headers={"Authorization": "Bearer not-a-real-token"})
         assert resp.status_code != 401
         assert resp.status_code == 200
 
@@ -774,7 +828,7 @@ class TestFailsClosedOnBackendTrouble:
         # Deliberately NOT overriding db_dep — exercises the real get_db(),
         # which raises RuntimeError before init_db() has ever run.
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.get("/api/v1/ticker/HPG")
+        resp = client.get("/api/ticker/HPG")
         assert resp.status_code == 500
 
     def test_out_of_range_score_in_db_is_rejected_not_served(self):
@@ -792,7 +846,7 @@ class TestFailsClosedOnBackendTrouble:
         app.include_router(router)
         app.dependency_overrides[db_dep] = lambda: {"daily_sentiment_history": FakeCollection([corrupted_row])}
         client = TestClient(app, raise_server_exceptions=False)
-        resp = client.get("/api/v1/ticker/HPG/history")
+        resp = client.get("/api/ticker/HPG/history")
         assert resp.status_code == 500
 
 

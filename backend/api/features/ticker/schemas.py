@@ -9,15 +9,15 @@ from pydantic import BaseModel, Field
 class TickerSentimentResponse(BaseModel):
     ticker: str = Field(..., description="Ma co phieu, vd 'HPG'")
     window: str = Field(..., description="Cua so thoi gian: '24h' | '48h' | '72h'")
-    score: float = Field(
+    score: float | None = Field(
         ..., ge=-1.0, le=1.0, description="S_final, trong khoang [-1.0, 1.0]"
     )
     is_empty: bool = Field(
         ...,
         description=(
             "True neu khong co event hop le nao trong cua so nay — "
-            "score se la 0.0 nhung KHONG duoc hieu la trung tinh, "
-            "ma la 'khong co du lieu'."
+            "score se la null (KHONG phai 0.0), vi 0.0 la mot gia tri trung "
+            "tinh hop le va khong duoc lan voi 'khong co du lieu'."
         ),
     )
 
@@ -39,7 +39,6 @@ class GaugeBreakdown(BaseModel):
 class TickerDetail(BaseModel):
     ticker: str
     company_name: str
-    sector: str
     window: str
     sentiment_score: float | None = Field(
         ...,

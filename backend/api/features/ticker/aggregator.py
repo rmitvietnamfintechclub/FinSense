@@ -15,7 +15,7 @@ from backend.core.lexicon import get_concept_weights
 
 
 # Fetch relevant clusters of the specified ticker
-async def _fetch_events(ticker: str, concepts: list[str], window_start: datetime, events_collection: AsyncIOMotorCollection) -> list[dict]:
+async def fetch_events(ticker: str, concepts: list[str], window_start: datetime, events_collection: AsyncIOMotorCollection) -> list[dict]:
     cursor = events_collection.find(
         {
             "updated_at": {"$gte": window_start},
@@ -54,11 +54,11 @@ def assemble_live_sentiment(
         w_time = recency_weight(age_hours, lambda_)
 
         analysis = event.get("aggregated_analysis") or {}
-        for ts in analysis.get("ticker_sentiments", []):
+        for ts in analysis.get("ticker_sentiments") or []:
             if ts.get("ticker") == ticker and ts.get("score") is not None:
                 ticker_scored_weights.append((ts["score"], w_time))
 
-        for cs in analysis.get("concept_sentiments", []):
+        for cs in analysis.get("concept_sentiments") or []:
             concept = cs.get("concept")
             if concept in concept_scored_weights and cs.get("score") is not None:
                 concept_scored_weights[concept].append((cs["score"], w_time))
@@ -86,7 +86,7 @@ async def compute_live_sentiment(
 
     concept_weights = get_concept_weights(ticker)
     relevant_concepts = list(concept_weights.keys())
-    events = await _fetch_events(ticker, relevant_concepts, window_start, events_collection)
+    events = await fetch_events(ticker, relevant_concepts, window_start, events_collection)
 
     result = assemble_live_sentiment(ticker, events, concept_weights, lambda_, now)
 

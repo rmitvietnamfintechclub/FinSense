@@ -19,7 +19,7 @@ from backend.core.config import api_settings
 from backend.core.database_async import get_db
 from backend.core.enums import Ticker
 
-router = APIRouter(prefix="/api/v1/ticker", tags=["ticker"])
+router = APIRouter(prefix="/api/ticker", tags=["ticker"])
 EVENT_CLUSTERS_COLLECTION = "event_clusters"
 
 
