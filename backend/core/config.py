@@ -62,6 +62,11 @@ class APISettings(BaseSettings):
     MAX_PAGE_SIZE: int = 50
     SENTIMENT_BUCKET_THRESHOLD: float = 0.2
 
+    # Ticker detail page (FS-37)
+    TICKER_EVENTS_PAGE_SIZE: int = 5
+    TICKER_HISTORY_DAYS: list[int] = [7, 30, 90]
+    DEFAULT_TICKER_HISTORY_DAYS: int = 30
+
     # CORS — the two Next.js apps. Browsers block cross-origin fetches without
     # this, so an unlisted frontend origin fails at preflight, not in the route.
     CORS_ORIGINS: list[str] = [
