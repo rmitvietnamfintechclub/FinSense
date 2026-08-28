@@ -8,10 +8,18 @@ from backend.core.config import APISettings, api_settings
 from backend.core.formulas import (
     SFinalResult,
     blend_s_final,
+    clamp_score,
     recency_weight,
     time_weighted_average,
 )
 from backend.core.lexicon import get_concept_weights
+
+
+def age_in_hours(now: datetime, timestamp: datetime) -> float:
+    """Clamped at zero: clock skew between the pipeline host and the API host
+    can leave an updated_at in the future, and recency_weight rejects a
+    negative age with a ValueError."""
+    return max(0.0, (now - timestamp).total_seconds() / 3600)
 
 
 # Fetch relevant clusters of the specified ticker
@@ -40,7 +48,7 @@ def assemble_live_sentiment(
     concept_scored_weights: dict[str, list[tuple[float, float]]] = {c: [] for c in concept_weights}   
 
     for event in events:
-        age_hours = (now - event["updated_at"]).total_seconds() / 3600
+        age_hours = age_in_hours(now, event["updated_at"])
         w_time = recency_weight(age_hours, lambda_)
 
         analysis = event.get("aggregated_analysis") or {}
@@ -83,6 +91,6 @@ async def compute_live_sentiment(
     return {
         "ticker": ticker,
         "window": window,
-        "score": result.score,
+        "score": clamp_score(result.score),
         "is_empty": result.is_empty,
     }

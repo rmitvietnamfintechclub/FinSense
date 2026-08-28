@@ -20,7 +20,7 @@ from backend.api.features.dashboard.service import (
 from backend.core.config import api_settings
 from backend.core.database_async import get_db
 
-router = APIRouter(prefix="/api/v1/dashboard", tags=["dashboard"])
+router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
 def window_param(
@@ -31,11 +31,16 @@ def window_param(
     return window
 
 
+def page_param(page: int = Query(1, ge=1)) -> int:
+    return page
+
+
 def db_dep() -> AsyncIOMotorDatabase:
     return get_db()
 
 
 WindowDep = Annotated[str, Depends(window_param)]
+PageDep = Annotated[int, Depends(page_param)]
 DbDep = Annotated[AsyncIOMotorDatabase, Depends(db_dep)]
 
 
@@ -55,17 +60,23 @@ async def read_gauge(window: WindowDep, db: DbDep) -> GaugeResponse:
 @router.get("/events", response_model=EventsResponse)
 async def read_events(
     window: WindowDep,
+    page: PageDep,
     db: DbDep,
-    limit: int = Query(api_settings.DEFAULT_EVENTS_LIMIT, ge=1, le=50),
+    limit: int = Query(
+        api_settings.DEFAULT_EVENTS_LIMIT, ge=1, le=api_settings.MAX_PAGE_SIZE
+    ),
 ) -> EventsResponse:
-    return await get_events(db, window=window, limit=limit)
+    return await get_events(db, window=window, page=page, limit=limit)
 
 
 # FS-25
 @router.get("/tickers", response_model=TickersResponse)
 async def read_tickers(
     window: WindowDep,
+    page: PageDep,
     db: DbDep,
-    limit: int = Query(api_settings.DEFAULT_TICKERS_LIMIT, ge=1, le=50),
+    limit: int = Query(
+        api_settings.DEFAULT_TICKERS_LIMIT, ge=1, le=api_settings.MAX_PAGE_SIZE
+    ),
 ) -> TickersResponse:
-    return await get_tickers(db, window=window, limit=limit)
+    return await get_tickers(db, window=window, page=page, limit=limit)

@@ -8,8 +8,15 @@ invites the same drift the sentiment rubric was written to stop: the model settl
 on a house average, or moves the number in response to prompt wording rather than
 anything about the article.
 
-Embedding this rubric into the prompt template is a **later** step of the parent
-ticket. This document does not modify any prompt.
+This document is the **design rationale**. Its model-facing counterpart is
+[`backend/pipeline/stages/extract/prompts/docs/AI_CONFIDENCE_v3.md`](../../backend/pipeline/stages/extract/prompts/docs/AI_CONFIDENCE_v3.md)
+(and `AI_CONFIDENCE_v2.md` for the version before worked examples were added), which
+`prompt_builder` substitutes into prompt `v2` and later at render time — pinned by
+filename, so each prompt version keeps the rubric it shipped with. The two
+are a matched pair: this one explains *why* the bands are where they are, that one
+tells the model what to do. **A band edit here is not live until the counterpart is
+edited too — and editing the counterpart requires cutting a new prompt version**, since
+it changes what an already-stamped `prompt_version` sends.
 
 ## Source of truth
 

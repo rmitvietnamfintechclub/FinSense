@@ -42,6 +42,7 @@ def setup_indexes():
     # event_clusters
     db.event_clusters.create_index("cluster_id", unique=True, name="cluster_id_unique")
     db.event_clusters.create_index([("created_at", DESCENDING)], name="created_at_desc")
+    db.event_clusters.create_index([("updated_at", DESCENDING)], name="updated_at_desc")
     db.event_clusters.create_index(
         "aggregated_analysis.ticker_sentiments.ticker", name="ticker_idx"
     )

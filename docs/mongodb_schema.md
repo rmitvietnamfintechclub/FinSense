@@ -100,7 +100,8 @@ Core collection. One document per event. Written by pipeline, read by serving AP
 
 **Indexes:**
 - `cluster_id` → unique
-- `created_at` → descending (rolling window queries, audit panel default sort)
+- `created_at` → descending (audit panel default sort)
+- `updated_at` → descending (every rolling-window serving query filters on this; without it the dashboard collection-scans on each request)
 - `aggregated_analysis.ticker_sentiments.ticker` → for ticker-level serving queries
 
 ---
