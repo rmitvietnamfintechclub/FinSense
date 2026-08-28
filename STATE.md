@@ -21,8 +21,10 @@ find . -path ./.venv -prune -o -name '*.py' -size -1c -print   # find the empty 
 |---|---|
 | Pipeline `rss → cluster → scraper → extract → aggregate` | **Verified end to end on live data** |
 | EOD batch (`pipeline/eod_batch/`) + VNDirect price adapter | Reviewed and hardened 2026-08-25; suite green, **never run against real data** |
-| API — ticker + dashboard features | Implemented and runnable; routes smoke-tested, **never run against real Atlas data** |
-| API — auth, audit, events, history, internal | Empty files, routers commented out in `main.py` |
+| API — ticker + dashboard features | Implemented and runnable; **smoke-tested against live Atlas data 2026-08-28** |
+| API — auth | **Implemented.** `POST /api/auth/login` (JWT, bcrypt) + `audit/guard.py::require_admin`. No admin seeded yet — run `scripts/seed_admins.py` before first login |
+| API — audit | **Implemented.** `/audit/summary`, `/audit/articles`, `PATCH /audit/events/{cluster_id}/{source}`, `/audit/log`. Read paths verified against live Atlas data; the PATCH write path is covered by unit tests only |
+| API — contract parity | **14 documented endpoints, 14 implemented, zero drift** against `docs/openapi.yaml` |
 | Frontend (both apps, `ui/`, `types/`) | Every file 0 bytes — cannot be installed or run |
 | Evaluation harness | Only `cluster_threshold.py` works; runner/metrics empty, no ground truth |
 
@@ -45,13 +47,16 @@ below.
 
 ## Health
 
-- **Test suite: 15 failing, 227 passing, 10 skipped.** One cause, all in `test_dashboard.py`:
+- **Test suite: 15 failing, 361 passing, 10 skipped.** One cause, all in `test_dashboard.py`:
   they monkeypatch `dashboard.service.get_database` and call the services synchronously. The module
   is async + injected-`db` and has moved further since (pagination, `rank`, `sources` counts), so
   the whole file needs rewriting, not patching. All four dashboard endpoints are untested.
 - **`ruff check backend/` is clean.** CI only runs ruff, so this is the gate that matters.
 - `test_eod_batch.py` and `test_price_adapter.py` are fully green (57 tests). The former no longer
   uses mongomock for `daily_sentiment_history` — see `FakeHistoryCollection`.
+- `test_jwt_handler.py` (19), `test_guard.py` (13) and `test_audit.py` (36) are green — auth and
+  the audit panel are the best-covered API areas. The audit PATCH write path is fake-collection
+  only; `array_filters` cannot run under mongomock (see CLAUDE.md).
 - No test execution in CI at all; `ci.yml` runs ruff and nothing else.
 
 ## Known broken / blocked
@@ -114,11 +119,28 @@ Not bugs — unresolved calibration, flagged by the live runs.
 - **`EXTRACTION_TEMPERATURE` is ignored** by `gemini-3.6-flash`, which uses fixed sampling defaults.
   Extractions are not deterministic, which weakens prompt-evolution comparisons.
 
+## Audit panel — known v1 limitations
+
+- **No removal mechanism for a hallucinated ticker.** `error_type: "Wrong ticker"` is recorded for
+  the US-G5 taxonomy, but the bad score stays in `source_breakdown` and therefore in
+  `aggregated_analysis`. Deliberate product decision for v1; revisit alongside the extraction-quality
+  work, since STATE already records tickers being attributed to unrelated companies.
+- **`pending_review` never reaches zero.** It is `total_articles - audited_articles` by product
+  decision, so it counts non-centroid articles that have no `ai_response` and can never be audited.
+- **`PATCH /audit/events/...` is not transactional.** It updates `event_clusters` then inserts into
+  `audit_log` as two writes, so a failed insert leaves a source audited with no log entry. Low
+  severity because the update is idempotent — the admin sees a 500 and a retry heals the state.
+  Fix with a Motor session if audit history ever becomes compliance-relevant.
+- **No rate limiting on `POST /auth/login`.** bcrypt's cost slows brute force but does not stop it.
+- **`representative_article.title` is null on clusters written before 2026-08-28.** No backfill
+  exists by choice — the dev database is disposable, so re-ingesting populates titles naturally.
+  The API falls back to `event_title` for any row that stays null.
+
 ## Empty scaffolding inventory
 
 Seeded ahead of implementation, all 0 bytes:
 
-- All four `docs/adr/ADR-00*.md`.
+- `docs/adr/ADR-001`, `ADR-003`, `ADR-004`. (`ADR-002` is now written.)
 - 5 of 7 workflows — `ci-api.yml`, `ci-frontend.yml`, `ci-pipeline.yml`, `codegen-types.yml`,
   `schedule-pipeline.yml` — plus `.github/dependabot.yml` and `.github/CODEOWNERS`. Only `ci.yml`
   and `schedule-eod.yml` have content.
@@ -127,10 +149,11 @@ Seeded ahead of implementation, all 0 bytes:
 - `evaluation/runner.py`, `evaluation/metrics.py`. (`evaluation/README.md` and the whole
   `evaluation/results/` directory were deleted on 2026-08-23; only `cluster_threshold.py` remains
   functional.)
-- `scripts/seed_admins.py`, `scripts/run_evaluation.py`.
+- `scripts/run_evaluation.py`. (`scripts/seed_admins.py` is now implemented.)
 - `backend/core/exception.py` — no shared exception hierarchy; error handling is ad hoc per module.
-- `backend/api/tests/conftest.py` — `backend.*` imports resolve only because `uv sync` installs the
-  project editable into `.venv`. Run API tests through `uv run`.
+- `backend/api/tests/conftest.py`, `tests/integration/test_api_routes.py`,
+  `tests/e2e/test_admin_login_flow.py` — still 0 bytes. `backend.*` imports resolve only because
+  `uv sync` installs the project editable into `.venv`. Run API tests through `uv run`.
 - Prompts `v2.txt` and `v3.txt`. `PROMPT_VERSION` defaults to `v1`, the only one with content.
 
 ## Documentation drift
@@ -139,6 +162,8 @@ Trust the tree over the docs.
 
 - `docs/mongodb_schema.md` documents a `concept_dictionary` collection that `scripts/init_db.py`
   never creates, and a `needs_review` field on `aggregated_analysis` that no Pydantic schema has.
+  (Its `articles` block was corrected 2026-08-28 — it had listed `article_id`/`ingested_at`, which
+  no code writes, and omitted `title`/`summary`/`full_content`. `admin_users` was added the same day.)
 - `README.md` links to `backend/README.md` and `frontend/README.md`, neither of which exists.
 
 ## Next up
@@ -148,7 +173,11 @@ Ordered by what unblocks the most:
 1. Throttle the scraper — you lose real articles every run and it worsens with each one.
 2. Resolve which Gemini limit you're hitting, from the quota dashboard. That decides whether the
    answer is retries/backoff or a paid tier.
-3. Run the API against a seeded Atlas dev database — every endpoint so far is fake-collection only.
+3. Seed an admin (`scripts/init_db.py` then `scripts/seed_admins.py`) and exercise the audit
+   `PATCH` end to end — it is the one write path never run against real Mongo.
+4. Build `frontend/admin-panel` (login + audit queue). Regenerate
+   `frontend/types/generated/api.types.ts` first — `docs/openapi.yaml` changed substantially on
+   2026-08-28 and the generated types are stale.
 4. Give `schedule-pipeline.yml` content. The EOD rollup is scheduled ahead of the thing it rolls up.
 5. Close the resume gap in `run_pipeline` so a stopped run can be continued without a reset.
 6. Rewrite `test_dashboard.py` against the async + DI services, then add a test job to CI so it can't rot again.

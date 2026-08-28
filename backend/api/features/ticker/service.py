@@ -208,9 +208,12 @@ def _source_breakdown_for_event(event: dict, symbol: str, threshold: float) -> l
             TickerEventSourceBreakdown(
                 source=source.get("source") or "",
                 score=source_score,
-                # See TickerEventSourceBreakdown.article_title docstring — no
-                # per-article title persisted yet, event_title is the closest stand-in.
-                article_title=event.get("event_title") or "",
+                # representative_article.title is nullable — clusters written
+                # before the field existed have none, so event_title remains the
+                # fallback rather than rendering an empty cell.
+                article_title=(
+                    representative_article.get("title") or event.get("event_title") or ""
+                ),
                 article_url=representative_article.get("url") or "",
             )
         )

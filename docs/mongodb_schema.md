@@ -2,7 +2,7 @@
 
 **Database:** `finsense`  
 **Environment:** MongoDB Atlas Free Tier (M0)  
-**Collections:** 7  
+**Collections:** 8  
 **Source of truth:** SRS FR-A through FR-G, Backlog US-B1 through US-G8
 
 ---
@@ -16,28 +16,29 @@
 | `daily_sentiment_history` | Nightly Batch Job | Serving API | Pre-computed EOD scores for historical chart |
 | `static_ontology` | Manual seed / Admin | Serving API | Concept → sector weight + alias map |
 | `audit_log` | Serving API (audit endpoints) | Admin Panel | Immutable log of every approve/correct action |
+| `admin_users` | `scripts/seed_admins.py` (seed only) | Serving API (`/auth/login`) | Admin credentials + identity for the audit panel |
 
 ---
 
 ## 1. `articles`
 
-Persisted article metadata. Written by ingestion pipeline. Purpose: URL deduplication and audit trail. Full content is **not** stored — pipeline uses it transiently in memory only.
+Persisted article metadata. Written by the RSS ingestion stage. Purpose: URL deduplication and audit trail. Shape is defined by `backend/core/schemas/article.py` — trust that model over this block. Note there is no `article_id`, `ingested_at`, or `cluster_id` field: earlier revisions of this doc listed them, but no code has ever written them.
 
 ```json
 {
   "_id": "ObjectId (auto)",
-  "article_id": "string — e.g. 'cafef_5d8a9f2'",
+  "title": "string — headline as published in the RSS feed",
+  "summary": "string — RSS summary/description field",
   "url": "string — canonical URL, unique",
   "source": "string — e.g. 'CafeF'",
   "published_at": "ISODate",
-  "ingested_at": "ISODate",
-  "cluster_id": "string | null — populated after clustering step"
+  "full_content": "string | null — scraped body; null until the scraper stage runs"
 }
 ```
 
 **Indexes:**
 - `url` → unique (primary dedup guard)
-- `cluster_id` → for reverse-lookup from cluster → contributing articles
+- `cluster_id` → declared in `scripts/init_db.py`, but nothing writes the field; kept only so the index does not need recreating if reverse-lookup is added later
 
 ---
 
@@ -76,6 +77,7 @@ Core collection. One document per event. Written by pipeline, read by serving AP
     {
       "source": "string — e.g. 'CafeF'",
       "representative_article": {
+        "title": "string | null — headline of this source's representative article. Nullable: documents written before this field existed have no title, and a required field would break EventCluster validation on every pre-existing cluster. Backfillable by joining representative_article.url to articles.url",
         "url": "string",
         "published_at": "ISODate",
         "content_fed_to_ai": "string — the full_content sent to Gemini",
@@ -184,6 +186,36 @@ Immutable. No application code path may delete or modify entries (US-G4).
 
 ---
 
+## 7. `admin_users`
+
+Credential + identity store for the audit panel. **Seed-only** — no application code path
+creates, updates, or deletes a row here; `scripts/seed_admins.py` is the sole writer, and the API
+holds a read-only relationship with it. There is no self-service signup and no password-reset
+endpoint by design: the audit panel is internal to the dev team, not a public product.
+
+```json
+{
+  "_id": "ObjectId (auto)",
+  "admin_id": "string — stable identity, e.g. 'adm_minh'. Copied verbatim into audit_log.admin_id",
+  "username": "string — login handle, unique, lowercased on write and on lookup",
+  "display_name": "string — copied verbatim into audit_log.admin_name",
+  "password_hash": "string — bcrypt hash. NEVER the plaintext, never returned by any endpoint",
+  "is_active": "bool — false disables login without destroying the audit_log trail referencing this admin_id",
+  "created_at": "ISODate"
+}
+```
+
+`admin_id` and `display_name` are denormalised into every `audit_log` entry rather than joined at
+read time. That is deliberate: `audit_log` is immutable (US-G4), so an entry must keep showing who
+performed the action even if the admin row is later deactivated or the display name changes.
+Joining would let a rename silently rewrite history.
+
+**Indexes:**
+- `username` → unique (login lookup; the uniqueness guard is what stops a duplicate seed creating two accounts that both answer to one handle)
+- `admin_id` → unique (`audit_log` join key must identify exactly one admin)
+
+---
+
 ## Atlas Setup Checklist
 
 ### Step 1 — Create Cluster
@@ -219,6 +251,7 @@ Collections to create:
   - daily_sentiment_history
   - static_ontology
   - audit_log
+  - admin_users
 ```
 
 ---

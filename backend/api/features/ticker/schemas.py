@@ -90,10 +90,8 @@ class TickerEventSourceBreakdown(BaseModel):
     article_title: str = Field(
         ...,
         description=(
-            "TODO: representative_article hien khong luu title rieng (xem "
-            "backend/core/schemas/event_cluster.py::RepresentativeArticle) — "
-            "tam thoi fallback ve event_title cua ca cluster cho den khi pipeline "
-            "luu title cho tung representative_article."
+            "Title cua representative_article. Fallback ve event_title cua cluster "
+            "khi title la null — clusters tao truoc khi field nay ton tai khong co title."
         ),
     )
     article_url: str = Field(..., description="URL cua representative_article cua source nay")

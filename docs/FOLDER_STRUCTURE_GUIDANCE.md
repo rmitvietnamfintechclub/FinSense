@@ -53,11 +53,8 @@ main.py                        App entrypoint, router registration
 features/                      One folder per API domain
   auth/                        Login, JWT issuance
   audit/                       Admin audit queue, corrections, guard
-  dashboard/                   Market gauge and top tickers
-  events/                      Trending event list
-  history/                     Per-ticker daily sentiment history
-  ticker/                      Ticker detail, score aggregation
-  internal/                    Internal/health endpoints
+  dashboard/                   Market gauge, top tickers, trending event list
+  ticker/                      Ticker detail, score aggregation, daily history
 external/
   price/                       Price API adapter (placeholder until wired)
 tests/
@@ -112,7 +109,9 @@ stages/
       v3.txt
     stage.py                   Stage coordinator — run_extract()
   aggregate/                   Stage 5 — event-level aggregation
-    event_aggregator.py        Confidence-weighted average across a cluster's sources
+                               (the confidence-weighted blend moved to core/aggregation.py —
+                                the audit API recomputes it after a correction and may not
+                                import from backend.pipeline)
     stage.py                   Stage coordinator — run_aggregate()
 eod_batch/                     Separate cron entrypoint — NOT part of run_pipeline, so not a stage
   eod_batch.py                 Rolls daily sentiment into daily_sentiment_history (ICT days)
@@ -268,6 +267,12 @@ docs/
     ADR-003                     Why codegen over manual types
     ADR-004                     Workspace structure decisions
 ```
+
+Removed 2026-08-28: `features/events/`, `features/history/`, and `features/internal/` were
+0-byte scaffolding whose endpoints ended up elsewhere — the trending event list is
+`/api/dashboard/events`, per-ticker history is `/api/ticker/{symbol}/history`, and `/api/health`
+is defined directly in `main.py` because it touches no database. Do not recreate them; add to the
+owning feature folder instead.
 
 If you make an architectural decision that affects the whole team, write an ADR.
 Copy the format of an existing one.

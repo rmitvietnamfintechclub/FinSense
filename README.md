@@ -21,8 +21,11 @@ read on media tone — not a trading signal.
   per-ticker daily score and joins the VNDirect closing price, backing the historical chart.
 - **Prompt and model versioning** — every AI response is stamped with the prompt and model
   version that produced it, so extraction quality can be tracked over time.
-- **Human-in-the-loop audit design** — data model supports approving or correcting AI scores
-  with an immutable audit trail (API implementation in progress).
+- **Human-in-the-loop audit** — admins approve or correct AI scores per source article; every
+  action is written to an immutable `audit_log`, and a correction rebuilds the event's blended
+  score so it reaches the public dashboard immediately.
+- **JWT-authenticated admin panel** — bcrypt-hashed credentials, bearer tokens, and admin
+  identity carried into every audit record.
 
 ## Tech Stack
 
@@ -32,7 +35,7 @@ read on media tone — not a trading signal.
   API types generated from the OpenAPI spec
 
 **Backend**
-- Python 3.13, FastAPI (serving API — in progress)
+- Python 3.13, FastAPI (serving API — 14 endpoints, at full parity with the OpenAPI spec)
 - Pydantic v2 for data contracts
 - `uv` for dependency management
 
@@ -56,7 +59,7 @@ FinSense/
 ├── backend/
 │   ├── core/          Shared config, database clients, schemas, scoring logic
 │   ├── pipeline/       RSS → cluster → scrape → extract → aggregate, plus the nightly EOD batch
-│   └── api/            Serving API (FastAPI) — in progress
+│   └── api/            Serving API (FastAPI) — auth, audit, dashboard, ticker
 ├── frontend/
 │   ├── public-dashboard/   Public sentiment dashboard
 │   ├── admin-panel/        Authenticated audit panel
@@ -94,7 +97,9 @@ it is not live until it reaches the default branch. Runs are manual for now — 
 
 For a stage-by-stage breakdown of the pipeline — algorithms, failure handling, and the design
 decisions behind them — see [`docs/PIPELINE.md`](docs/PIPELINE.md). For the database shape, see
-[`docs/mongodb_schema.md`](docs/mongodb_schema.md). A broader
+[`docs/mongodb_schema.md`](docs/mongodb_schema.md). The REST contract — every endpoint, its
+parameters and response shape — is [`docs/openapi.yaml`](docs/openapi.yaml), which is the
+source of truth the frontend types are generated from. A broader
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) is still TODO.
 
 Current implementation status, known-broken things, and measured performance are tracked in

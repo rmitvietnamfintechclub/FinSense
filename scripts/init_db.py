@@ -27,6 +27,7 @@ def setup_collections():
         "daily_sentiment_history",
         "static_ontology",
         "audit_log",
+        "admin_users",
     ]:
         create_collection(name)
 
@@ -69,6 +70,13 @@ def setup_indexes():
     db.audit_log.create_index([("performed_at", DESCENDING)], name="performed_at_desc")
     db.audit_log.create_index("error_type", name="error_type")
     print("  audit_log: done")
+
+    # admin_users — both unique. username guards the login lookup; admin_id is the
+    # key audit_log denormalises, so two rows sharing one would make an audit entry
+    # ambiguous about who performed the action.
+    db.admin_users.create_index("username", unique=True, name="username_unique")
+    db.admin_users.create_index("admin_id", unique=True, name="admin_id_unique")
+    print("  admin_users: done")
 
 
 if __name__ == "__main__":

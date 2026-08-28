@@ -6,10 +6,10 @@ import logging
 
 from pymongo.collection import Collection
 
+from backend.core.aggregation import build_aggregated_analysis
 from backend.core.config import pipeline_settings
 from backend.core.database import get_database
 from backend.core.schemas.event_cluster import EventCluster
-from backend.pipeline.stages.aggregate.event_aggregator import build_aggregated_analysis
 
 logger = logging.getLogger(__name__)
 
