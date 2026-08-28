@@ -93,6 +93,16 @@ by `frontend/types/generate.sh` and must never be hand-edited.
   it; never edit an existing version file. `prompt_version` and `model_version` are stamped on every
   `AIResponse` so evolutions stay comparable — swapping `LLM_MODEL_NAME` mid-evolution makes the
   deltas uninterpretable, so treat everything before a switch as a separate baseline.
+- **A prompt template's *inputs* are append-only too.** From `v2`, `prompt_builder` composes the
+  prompt from files outside the template: `prompts/docs/SENTIMENT.md`, `prompts/docs/AI_CONFIDENCE.md`
+  and `lexicon/vietnam_financial_lexicon.json` fill the `{sentiment_rubric}`, `{confidence_rubric}`
+  and `{lexicon}` placeholders. That is deliberate — the rubrics are edited as documents, not as
+  prompt text — but it means editing one of those files silently changes what an existing
+  `prompt_version` sends. **Edit them, then cut a new `vN.txt`**, or past extractions stamped with
+  the old version are no longer reproducible.
+- `{article_text}` is substituted **last**, after the reference sections. Scraped bodies are
+  untrusted input; an article containing the literal string `{sentiment_rubric}` must stay literal.
+  Keep that ordering if you add a placeholder.
 - **Evaluation results are append-only** — one new file per run, never overwrite. The
   `evaluation/results/` directory was removed on 2026-08-23 along with the frozen test set; recreate
   it with that rule intact when the harness is built.

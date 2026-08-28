@@ -8,13 +8,19 @@ article scores −0.3 on one run and −0.7 on the next. That drift is not model
 to be tuned away — it is a missing specification. This document is that
 specification.
 
-Embedding this rubric into the prompt template is a **later** step of the parent
-ticket. This document does not modify any prompt.
+This document is the **design rationale**. Its model-facing counterpart is
+[`backend/pipeline/stages/extract/prompts/docs/SENTIMENT.md`](../../backend/pipeline/stages/extract/prompts/docs/SENTIMENT.md),
+which `prompt_builder` substitutes into prompt `v2` and later at render time. The two
+are a matched pair: this one explains *why* the bands are where they are, that one
+tells the model what to do. **A band edit here is not live until the counterpart is
+edited too — and editing the counterpart requires cutting a new prompt version**, since
+it changes what an already-stamped `prompt_version` sends.
 
 ## Source of truth
 
-`BUCKET_EDGES` and `BUCKET_LABELS` in [`backend/core/buckets.py`](../../backend/core/buckets.py)
-are the **code-side source of truth**. This document and those constants are a
+`BUCKETS` in [`backend/core/buckets.py`](../../backend/core/buckets.py) — one tuple of
+`(low, high, label)` triples, not the separate `BUCKET_EDGES`/`BUCKET_LABELS` pair this
+document originally assumed — is the **code-side source of truth**. This document and those constants are a
 matched pair and **must change together** — a band edit in one without the
 corresponding edit in the other is a defect, not a drift to reconcile later.
 
@@ -219,11 +225,11 @@ the live one, and the two schemes never disagree about a score's sign. The 5-ban
 scheme only subdivides the outer two. Nothing needs migrating for them to coexist.
 
 **One real hazard, flagged for review.** `SENTIMENT_BUCKET_THRESHOLD` is a
-`BaseSettings` field and therefore env-overridable, while `BUCKET_EDGES` is a
+`BaseSettings` field and therefore env-overridable, while `BUCKETS` is a
 hardcoded literal. Anyone who sets `SENTIMENT_BUCKET_THRESHOLD` to something other
 than `0.2` silently breaks the refinement relationship above — the two schemes would
 then disagree about signs with nothing to catch it. Whether to pin that setting,
-derive it from `BUCKET_EDGES`, or retire the 3-band path is a decision for the
+derive it from `BUCKETS`, or retire the 3-band path is a decision for the
 follow-up subtask that owns read-time bucketing. It is deliberately not decided here.
 
 ---

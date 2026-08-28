@@ -118,6 +118,43 @@ def test_prompt_version_comes_from_settings(monkeypatch, tmp_path):
     prompt_builder._load_template.cache_clear()
 
 
+def test_v2_composes_rubrics_and_lexicon(monkeypatch):
+    """v2 pulls its three reference sections from files. Guards the placeholder
+    contract: a renamed placeholder would ship a prompt with a literal
+    `{sentiment_rubric}` in it and no rubric at all."""
+    monkeypatch.setattr(prompt_builder.pipeline_settings, "PROMPT_VERSION", "v2", raising=False)
+    prompt, version = build_prompt("NOI DUNG BAI BAO")
+
+    assert version == "v2"
+    references, _, article = prompt.partition("Article:\n")
+    for placeholder in ("{lexicon}", "{sentiment_rubric}", "{confidence_rubric}", "{article_text}"):
+        assert placeholder not in references
+    assert article.strip() == "NOI DUNG BAI BAO"
+
+    assert "n\u1ee3 x\u1ea5u" in references          # from the lexicon JSON
+    assert "strongly_negative" in references           # from SENTIMENT.md
+    assert "unusable" in references                    # from AI_CONFIDENCE.md
+
+
+def test_article_text_cannot_inject_a_reference_section(monkeypatch):
+    """Scraped bodies are untrusted. article_text is substituted last, so a
+    placeholder inside it stays literal instead of pulling in a rubric."""
+    monkeypatch.setattr(prompt_builder.pipeline_settings, "PROMPT_VERSION", "v2", raising=False)
+    prompt, _ = build_prompt("{sentiment_rubric}")
+
+    _, _, article = prompt.partition("Article:\n")
+    assert article.strip() == "{sentiment_rubric}"
+
+
+def test_maintainer_notes_are_stripped_from_rubrics():
+    """The rubric docs carry an HTML note to the maintainer and unfilled example
+    slots. Neither is addressed to the model."""
+    for name in ("SENTIMENT", "AI_CONFIDENCE"):
+        rubric = prompt_builder._load_rubric(name)
+        assert "<!--" not in rubric
+        assert "example pending real data" not in rubric
+
+
 def test_missing_template_is_a_handled_failure(monkeypatch, tmp_path):
     monkeypatch.setattr(prompt_builder, "_PROMPTS_DIR", tmp_path / "nope")
     monkeypatch.setattr(prompt_builder.pipeline_settings, "PROMPT_VERSION", "vmissing", raising=False)

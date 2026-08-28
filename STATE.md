@@ -90,9 +90,10 @@ below.
   on a missing `LLM_API_KEY`.
 - **`ci.yml` lints on Python 3.11** while `pyproject.toml` requires `>=3.13`. It passes only because
   ruff doesn't execute the code.
-- **Dead lexicon data.** `pipeline/lexicon/vietnam_financial_lexicon.json` and
-  `concept_dictionary.json` are referenced by no Python code; only `relevance_keywords.json` is
-  loaded (by `stages/rss/filter.py`).
+- **Dead lexicon data.** `pipeline/lexicon/concept_dictionary.json` is referenced by no Python
+  code. `relevance_keywords.json` is loaded by `stages/rss/filter.py`, and
+  `vietnam_financial_lexicon.json` by `stages/extract/prompt_builder.py` — but only when
+  `PROMPT_VERSION` is `v2` or later, and it still defaults to `v1`.
 - **`test.py` at the repo root** is a scratch script that hits live RSS feeds on import.
 
 ## Open quality questions
@@ -107,10 +108,18 @@ Not bugs — unresolved calibration, flagged by the live runs.
   clusters with a 56-article blob; 0.86 gives 4. Do not lower it casually.
 - **Topic chaining over-merges.** One run produced a 12-article "VN-Index" cluster and a 10-article
   "gold price" cluster, each spanning several distinct events.
-- **Extraction quality is unrefined** (prompt work deferred): articles listing many tickers get
+- **Prompt `v2` is written but not switched on.** `PROMPT_VERSION` still defaults to `v1`, so the
+  rubrics and lexicon `v2` composes are not reaching the model yet. Nothing below has been re-measured
+  against `v2`; every symptom in this section was observed under `v1`.
+- **`v2` costs roughly 10k tokens of fixed preamble per article** against roughly 200 for `v1`, and
+  `client.py` requests no explicit prompt caching. Budget for that before switching a scheduled run.
+- **Extraction quality is unrefined** (measured under `v1`, whose prompt defines neither scale):
+  articles listing many tickers get
   ~0.5 assigned to all of them; unrelated tickers come back as exactly `0.0`, which renders as
   genuine neutral; and an article about an out-of-vocabulary company (PNJ) had its sentiment
-  attributed to unrelated tickers rather than returning an empty list.
+  attributed to unrelated tickers rather than returning an empty list. `v2` is the intended fix for
+  the first two — it defines both scales and separates "neutral" from "could not tell" — but that is
+  a hypothesis until someone runs it.
 - **`EXTRACTION_TEMPERATURE` is ignored** by `gemini-3.6-flash`, which uses fixed sampling defaults.
   Extractions are not deterministic, which weakens prompt-evolution comparisons.
 
@@ -131,7 +140,11 @@ Seeded ahead of implementation, all 0 bytes:
 - `backend/core/exception.py` — no shared exception hierarchy; error handling is ad hoc per module.
 - `backend/api/tests/conftest.py` — `backend.*` imports resolve only because `uv sync` installs the
   project editable into `.venv`. Run API tests through `uv run`.
-- Prompts `v2.txt` and `v3.txt`. `PROMPT_VERSION` defaults to `v1`, the only one with content.
+- Prompt `v3.txt`. `v2.txt` was implemented on 2026-08-28: v1 plus three reference sections
+  composed at render time by `prompt_builder` — `prompts/docs/SENTIMENT.md`,
+  `prompts/docs/AI_CONFIDENCE.md`, and `lexicon/vietnam_financial_lexicon.json`. Editing those
+  files changes what v2 sends, so a rubric or lexicon edit needs a new prompt version to keep
+  evolution deltas comparable. `PROMPT_VERSION` still defaults to `v1`.
 
 ## Documentation drift
 
