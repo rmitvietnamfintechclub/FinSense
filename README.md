@@ -19,6 +19,10 @@ read on media tone — not a trading signal.
   excluding low-confidence extractions.
 - **End-of-day history** — a separate nightly batch rolls each ICT day's event sentiment into a
   per-ticker daily score and joins the VNDirect closing price, backing the historical chart.
+- **Rubric-driven prompting** — the sentiment and confidence scales are maintained as documents
+  and composed into the prompt at render time, along with a Vietnamese financial lexicon that
+  tells the model how VN market idiom and jargon actually read. The latest version adds few-shot
+  examples drawn from real scraped articles, each citing the cluster it came from.
 - **Prompt and model versioning** — every AI response is stamped with the prompt and model
   version that produced it, so extraction quality can be tracked over time.
 - **Human-in-the-loop audit** — admins approve or correct AI scores per source article; every

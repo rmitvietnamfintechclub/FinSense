@@ -264,13 +264,40 @@ re-extract work already done.
 
 ### Building the prompt
 
-`prompt_builder.build_prompt` loads `prompts/{PROMPT_VERSION}.txt` (cached) and substitutes
-`{article_text}`. It returns the version string alongside the prompt so it can be stamped on the
-result.
+`prompt_builder.build_prompt` loads `prompts/{PROMPT_VERSION}.txt` (cached) and fills its
+placeholders. It returns the version string alongside the prompt so it can be stamped on the result.
+
+`v1` is a self-contained template with a single `{article_text}` placeholder. **`v2` is composed at
+render time** from four sources:
+
+| Placeholder | Filled from |
+|---|---|
+| `{lexicon}` | `pipeline/lexicon/vietnam_financial_lexicon.json`, rendered to markdown bullets |
+| `{sentiment_rubric}` | `prompts/docs/SENTIMENT_<version>.md` |
+| `{confidence_rubric}` | `prompts/docs/AI_CONFIDENCE_<version>.md` |
+| `{article_text}` | the scraped body |
+
+Each loader is cached for the process lifetime, like the template itself.
+
+The lexicon renderer iterates whatever top-level sections and per-entry fields the JSON contains
+rather than naming them, so adding a term — or a field, or a whole section — reaches the prompt with
+no code change. The two rubric docs are stripped on load: HTML comments always, and the trailing
+`## Examples` section while its slots still read `example pending real data`. Fill those slots and
+the section starts rendering on its own.
+
+**Substitution order matters.** The three reference sections go in first and `{article_text}` last.
+A scraped body is untrusted input; injecting it last means an article containing the literal string
+`{sentiment_rubric}` stays literal instead of pulling a rubric into the article slot.
 
 **Prompt files are append-only.** Never edit an existing `vN.txt`; add `v(N+1).txt` and repoint
 `PROMPT_VERSION`. Every `AIResponse` carries `prompt_version` and `model_version` so evolutions stay
-comparable after the fact.
+comparable after the fact. Since `v2`, that rule extends to the composed inputs: editing a rubric doc
+or the lexicon changes what an already-stamped `prompt_version` sends, so cut a new version file
+whenever you change one.
+
+**Cost note.** `v2`'s fixed preamble is roughly 10k tokens, against roughly 200 for `v1`, and it is
+sent on every article. `client.py` does not request explicit prompt caching, though the prefix is
+byte-identical across calls within a run.
 
 ### Calling Gemini
 

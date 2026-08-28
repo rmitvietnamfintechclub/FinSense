@@ -101,12 +101,17 @@ stages/
     stage.py                   Stage coordinator — run_scraper()
   extract/                     Stage 4 — LLM sentiment extraction
     client.py                  Gemini binding, request schema, invoke_llm()
-    prompt_builder.py          Loads the active prompt version from config
+    prompt_builder.py          Composes the active prompt version — template + rubrics + lexicon
     extractor.py               Orchestrates prompt → invoke → validate → AIResponse
     prompts/                   Versioned prompt files — never edit existing files
-      v1.txt
-      v2.txt
-      v3.txt
+      v1.txt                     Self-contained; only placeholder is {article_text}
+      v2.txt                     Composed at render time from docs/ + lexicon/
+      v3.txt                     v2 plus worked few-shot examples in its rubrics
+      docs/                    Model-facing rubrics substituted into v2+ — NOT prose about the code
+        SENTIMENT_v2.md          Fills {sentiment_rubric} for v2 (examples unfilled, stripped)
+        SENTIMENT_v3.md          Fills {sentiment_rubric} for v3 (7 worked examples)
+        AI_CONFIDENCE_v2.md      Fills {confidence_rubric} for v2 (examples unfilled, stripped)
+        AI_CONFIDENCE_v3.md      Fills {confidence_rubric} for v3 (5 worked examples)
     stage.py                   Stage coordinator — run_extract()
   aggregate/                   Stage 5 — event-level aggregation
                                (the confidence-weighted blend moved to core/aggregation.py —
@@ -117,7 +122,7 @@ eod_batch/                     Separate cron entrypoint — NOT part of run_pipe
   eod_batch.py                 Rolls daily sentiment into daily_sentiment_history (ICT days)
   real_price.py                VNDirect closing-price adapter
 lexicon/                       JSON config files — pipeline-only
-  vietnam_financial_lexicon.json   Sentiment terms, abbreviations, aliases (currently unused)
+  vietnam_financial_lexicon.json   Sentiment terms + abbreviations; fills {lexicon} in prompt v2+
   concept_dictionary.json          Concept alias resolution (currently unused)
   relevance_keywords.json          Keywords used by relevance filter in rss/filter.py
 tests/
@@ -154,6 +159,16 @@ register it in `stages/scraper/source_client.py`. No other files need to change.
 `stages/extract/prompts/`, then set `PROMPT_VERSION` in the environment. Never
 edit existing version files — they are the historical record, and
 `prompt_version` is stored on every `AIResponse` so evolutions stay comparable.
+
+From `v2` the template is a skeleton and the substance lives in files it pulls
+in at render time — `prompts/docs/SENTIMENT_<version>.md`,
+`prompts/docs/AI_CONFIDENCE_<version>.md`, `lexicon/vietnam_financial_lexicon.json`.
+The rubric docs are pinned to the prompt version **by filename**, so reworking one
+means copying it to the next suffix alongside a new `vN.txt` — never editing in
+place. The lexicon is shared across versions, so a term added there changes every
+composed prompt; cut a new `vN.txt` after touching it. `prompt_builder` needs
+changing only to add a *new* placeholder, never to add a lexicon term or reword a
+rubric.
 
 **Changing the model:** don't, mid-evolution. `model_version` is stored on every
 `AIResponse`. Swapping models between evolutions makes the deltas
@@ -327,6 +342,8 @@ outside branch pointers and breaks the history. Push from git.
 | Add a new API endpoint | `backend/api/features/<new_feature>/` |
 | Add a new news source | `backend/pipeline/stages/scraper/adapters/` + register in `scraper/source_client.py` |
 | Change the LLM prompt | `backend/pipeline/stages/extract/prompts/` — new versioned file only |
+| Change the sentiment or confidence rules | `stages/extract/prompts/docs/*.md`, then cut a new `vN.txt` |
+| Add a Vietnamese term the LLM misreads | `pipeline/lexicon/vietnam_financial_lexicon.json`, then cut a new `vN.txt` |
 | Change the LLM request schema | `backend/pipeline/stages/extract/client.py` |
 | Change what gets stored per extraction | `backend/core/schemas/sentiment.py` |
 | Change scoring formula | `backend/core/formulas.py` — coordinate with both teams |
