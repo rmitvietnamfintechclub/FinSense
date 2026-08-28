@@ -23,8 +23,30 @@ tags:
     description: Admin audit panel endpoints (JWT required)
   - name: auth
     description: Authentication
+  - name: internal
+    description: Liveness/health endpoints
 
 paths:
+
+  /health:
+    get:
+      tags: [internal]
+      summary: Liveness probe
+      description: >
+        Defined directly in backend/api/main.py rather than a feature router —
+        it touches no database and exists so a platform health check can hit the
+        process without a DB round trip.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
 
   # ─────────────────────────────────────────
   # DASHBOARD
@@ -115,8 +137,35 @@ paths:
   # TICKER DETAIL
   # ─────────────────────────────────────────
 
-  # Path param is {ticker} here, not the {symbol} the two unimplemented ticker
-  # routes below still use. Align those on {ticker} when they get built.
+  /ticker/{symbol}:
+    get:
+      tags: [ticker]
+      summary: Ticker identity card + live sentiment gauge
+      description: >
+        Company info and live S_final for the selected window, computed at
+        request time from event_clusters — not from daily_sentiment_history.
+        An unknown symbol is a 404, never a 200 with a zero score, so the
+        client can tell it apart from a genuinely quiet ticker. Lowercase
+        input is accepted and upper-cased server-side.
+      parameters:
+        - $ref: '#/components/parameters/symbol'
+        - $ref: '#/components/parameters/window'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TickerDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  # Path param is {ticker} on this one route only, by request; the FS-37 routes
+  # use {symbol}. Worth unifying next time this file is touched.
   /ticker/{ticker}/sentiment:
     get:
       tags: [ticker]
@@ -174,6 +223,12 @@ paths:
                 $ref: '#/components/schemas/TickerHistory'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: Invalid days value (must be one of 7/30/90)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -182,11 +237,13 @@ paths:
       tags: [ticker]
       summary: Recent events mentioning this ticker
       description: >
-        Returns paginated list of events that mention the ticker
-        within the selected time window.
+        Returns a paginated list of events that mention the ticker, newest
+        first — the ticker's full event history, NOT scoped to the
+        24h/48h/72h window (that window only applies to the live S_final
+        gauge on GET /ticker/{symbol}). Page 2, 3, ... keeps going back as
+        far as event_clusters has data for this ticker.
       parameters:
         - $ref: '#/components/parameters/symbol'
-        - $ref: '#/components/parameters/window'
         - $ref: '#/components/parameters/page'
       responses:
         '200':
@@ -197,6 +254,12 @@ paths:
                 $ref: '#/components/schemas/TickerEvents'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: page < 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -240,13 +303,45 @@ paths:
   # AUDIT
   # ─────────────────────────────────────────
 
-  /audit/events:
+  /audit/summary:
     get:
       tags: [audit]
-      summary: Audit event queue — unaudited first
+      summary: Audit metric cards
+      description: >
+        The three counters at the top of the audit panel.
+        pending_review is total_articles - audited_articles by definition, so it
+        includes ingested articles that were never centroid-selected and therefore
+        have no ai_response to audit. That is intentional per product decision.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /audit/articles:
+    get:
+      tags: [audit]
+      summary: Audit queue — one row per (cluster_id, source)
+      description: >
+        The audit table. Deliberately FLAT: one row per source entry within a
+        cluster, not one row per cluster, because a source is the unit an admin
+        approves or corrects. A cluster with three sources yields three rows.
+        Only sources that have an ai_response appear — a source with no extraction
+        yet cannot be judged.
       security:
         - bearerAuth: []
       parameters:
+        - $ref: '#/components/parameters/audit_status'
+        - $ref: '#/components/parameters/audit_sort'
+        - $ref: '#/components/parameters/audit_search'
         - $ref: '#/components/parameters/page'
       responses:
         '200':
@@ -254,9 +349,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuditQueue'
+                $ref: '#/components/schemas/AuditArticles'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -266,9 +363,17 @@ paths:
       summary: Approve or correct a source entry within an event
       description: >
         Approves or corrects the AI extraction for one source within a cluster.
-        On correct — updates scores directly on event_clusters source_breakdown,
-        flips is_audited to true, writes immutable record to audit_log.
-        On approve — flips is_audited to true, writes to audit_log with no score changes.
+        On correct — merges the supplied scores into that source's ai_response,
+        flips is_audited to true, RECOMPUTES the cluster's aggregated_analysis so
+        the correction reaches the dashboard and ticker pages, and appends an
+        immutable audit_log record.
+        On approve — flips is_audited to true and appends an audit_log record with
+        no score changes.
+        Re-auditing an already-audited source is allowed and appends a further
+        audit_log entry; audit_log is append-only and never rewritten (US-G4).
+        admin_id and admin_name are taken from the JWT, never from the request body.
+        v1 has no removal mechanism: a hallucinated ticker is recorded via
+        error_type 'Wrong ticker' but its score remains in the extraction.
       security:
         - bearerAuth: []
       parameters:
@@ -294,16 +399,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  cluster_id:
-                    type: string
-                  source:
-                    type: string
-                  action_type:
-                    type: string
+                $ref: '#/components/schemas/AuditActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -312,6 +408,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -319,6 +417,9 @@ paths:
     get:
       tags: [audit]
       summary: Immutable audit history log
+      description: >
+        Newest first. No UI page consumes this yet, but audit_log is written by
+        every PATCH and US-G5/US-G6 depend on reading it back.
       security:
         - bearerAuth: []
       parameters:
@@ -334,6 +435,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/ServerError'
+
 
 # ─────────────────────────────────────────
 # COMPONENTS
@@ -395,6 +497,40 @@ components:
       schema:
         type: string
         example: evt_hpg_q2_2026
+
+    audit_status:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [pending, audited, all]
+        default: pending
+      description: Segmented filter in the audit toolbar.
+
+    audit_sort:
+      name: sort
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [newest, oldest, confidence_desc, confidence_asc]
+        default: newest
+      description: >
+        newest/oldest order by the article's published_at; confidence_* order by
+        the source's ai_confidence. Every ordering breaks ties on
+        (cluster_id, source) so pagination is a total order and rows are neither
+        dropped nor repeated across pages.
+
+    audit_search:
+      name: search
+      in: query
+      required: false
+      schema:
+        type: string
+      description: >
+        Case-insensitive match against the article title or a ticker symbol
+        present in that source's extraction. Empty/absent means no filtering.
 
   responses:
     BadRequest:
@@ -665,12 +801,55 @@ components:
         window:
           type: string
         score:
-          type: number
-          format: float
-          minimum: -1.0
-          maximum: 1.0
-          description: S_final. 0.0 when is_empty is true — see DashboardGauge.market_score.
+          $ref: '#/components/schemas/SentimentScore'
+          description: >
+            S_final. null when is_empty is true — 0.0 is a legitimate neutral
+            score and must not double as "no data".
         is_empty:
+          type: boolean
+          description: true if no valid events in window — UI shows neutral grey gauge.
+
+    TickerDetail:
+      type: object
+      required:
+        [ticker, company_name, window, sentiment_score, gauge, article_count,
+         event_count, last_updated, is_empty_state]
+      properties:
+        ticker:
+          $ref: '#/components/schemas/Ticker'
+        company_name:
+          type: string
+          description: >
+            display_name from backend/core/ticker_metadata.py — resolves the
+            TODO that used to sit here (see TickerFeedItem.company_name, still
+            open for the dashboard feed).
+        window:
+          type: string
+        sentiment_score:
+          $ref: '#/components/schemas/SentimentScore'
+        gauge:
+          type: object
+          properties:
+            score:
+              $ref: '#/components/schemas/SentimentScore'
+            positive_count:
+              type: integer
+            neutral_count:
+              type: integer
+            negative_count:
+              type: integer
+        article_count:
+          type: integer
+          description: Total event_coverage.total_articles across events mentioning this ticker in the window
+        event_count:
+          type: integer
+          description: Count of events mentioning this ticker in the window
+        last_updated:
+          type: string
+          format: date-time
+          nullable: true
+          description: Most recent updated_at among events mentioning this ticker — null if none
+        is_empty_state:
           type: boolean
           description: true if no valid events in window — UI shows neutral grey gauge.
 
@@ -681,8 +860,14 @@ components:
           $ref: '#/components/schemas/Ticker'
         days:
           type: integer
+          description: The requested range (7/30/90) — NOT the number of rows actually returned. See data.
         data:
           type: array
+          description: >
+            Oldest -> newest, one row per calendar day that exists in
+            daily_sentiment_history. Can be shorter than `days` if the EOD
+            batch hasn't run that many times yet — not an error. Nulls in
+            either field pass through untouched: no interpolation, no gap-filling.
           items:
             type: object
             properties:
@@ -690,7 +875,7 @@ components:
                 type: string
                 format: date
                 example: "2026-06-27"
-              sentiment_score:
+              daily_sentiment_score:
                 $ref: '#/components/schemas/SentimentScore'
               closing_price:
                 type: number
@@ -701,8 +886,6 @@ components:
       properties:
         ticker:
           $ref: '#/components/schemas/Ticker'
-        window:
-          type: string
         page:
           type: integer
         has_more:
@@ -721,15 +904,37 @@ components:
                 format: date-time
               article_count:
                 type: integer
-              sources:
-                type: object
-                properties:
-                  CafeF:
-                    type: integer
-                  VnExpress:
-                    type: integer
+                description: event_coverage.total_articles — articles ingested, higher than len(source_breakdown) by design
               sentiment_score:
                 $ref: '#/components/schemas/SentimentScore'
+                description: This ticker's entry from aggregated_analysis.ticker_sentiments — null if no source cleared AI_CONFIDENCE_THRESHOLD
+              source_breakdown:
+                type: array
+                description: >
+                  One row per source (not per article — each source contributes
+                  exactly one representative ai_response). Sources below
+                  AI_CONFIDENCE_THRESHOLD are excluded entirely, not shown with a
+                  null/greyed score.
+                items:
+                  type: object
+                  properties:
+                    source:
+                      type: string
+                      example: CafeF
+                    score:
+                      type: number
+                      format: float
+                      minimum: -1.0
+                      maximum: 1.0
+                      description: This source's own score for this ticker, from source_breakdown[].ai_response.ticker_sentiments[]
+                    article_title:
+                      type: string
+                      description: >
+                        representative_article.title. Nullable in storage — clusters
+                        written before the field existed have none — so the API falls
+                        back to the cluster's event_title rather than an empty string.
+                    article_url:
+                      type: string
 
     # ── Audit ──
 
@@ -772,57 +977,6 @@ components:
                 $ref: '#/components/schemas/Concept'
               score:
                 $ref: '#/components/schemas/SentimentScore'
-
-    AuditQueue:
-      type: object
-      properties:
-        page:
-          type: integer
-        has_more:
-          type: boolean
-        total_pending:
-          type: integer
-        items:
-          type: array
-          items:
-            type: object
-            properties:
-              cluster_id:
-                type: string
-              event_title:
-                type: string
-              created_at:
-                type: string
-                format: date-time
-              source_breakdown:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    source:
-                      type: string
-                    is_audited:
-                      type: boolean
-                    ai_confidence:
-                      type: number
-                    ticker_sentiments:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          ticker:
-                            $ref: '#/components/schemas/Ticker'
-                          score:
-                            $ref: '#/components/schemas/SentimentScore'
-                    concept_sentiments:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          concept:
-                            $ref: '#/components/schemas/Concept'
-                          score:
-                            $ref: '#/components/schemas/SentimentScore'
 
     AuditLog:
       type: object
@@ -890,3 +1044,124 @@ components:
               performed_at:
                 type: string
                 format: date-time
+
+    AuditSummary:
+      type: object
+      properties:
+        total_articles:
+          type: integer
+          description: Every document in the `articles` collection.
+        audited_articles:
+          type: integer
+          description: Source entries whose is_audited is true.
+        pending_review:
+          type: integer
+          description: >
+            total_articles - audited_articles. Includes articles that were never
+            centroid-selected and so have no ai_response to audit; this counter
+            therefore does not reach zero in normal operation.
+
+    AuditArticleRow:
+      type: object
+      description: One source entry within one cluster — the unit an admin audits.
+      properties:
+        cluster_id:
+          type: string
+        source:
+          type: string
+          example: CafeF
+        article_title:
+          type: string
+          nullable: true
+          description: >
+            Title of this source's representative article. Null for rows ingested
+            before titles were persisted; clients should fall back to event_title.
+        event_title:
+          type: string
+        article_url:
+          type: string
+        published_at:
+          type: string
+          format: date-time
+        ticker_count:
+          type: integer
+        ai_confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+        is_audited:
+          type: boolean
+        content_fed_to_ai:
+          type: string
+          nullable: true
+          description: Null until the scraper stage has fetched this article's body.
+        model_version:
+          type: string
+        prompt_version:
+          type: string
+        ticker_sentiments:
+          type: array
+          items:
+            type: object
+            properties:
+              ticker:
+                $ref: '#/components/schemas/Ticker'
+              score:
+                $ref: '#/components/schemas/SentimentScore'
+        concept_sentiments:
+          type: array
+          items:
+            type: object
+            properties:
+              concept:
+                $ref: '#/components/schemas/Concept'
+              score:
+                $ref: '#/components/schemas/SentimentScore'
+        last_audit:
+          type: object
+          nullable: true
+          description: Most recent audit_log entry for this (cluster_id, source). Null if never audited.
+          properties:
+            admin_name:
+              type: string
+            action_type:
+              type: string
+            error_type:
+              type: string
+              nullable: true
+            performed_at:
+              type: string
+              format: date-time
+
+    AuditArticles:
+      type: object
+      properties:
+        page:
+          type: integer
+        has_more:
+          type: boolean
+        total:
+          type: integer
+          description: Rows matching the current status/search filter, across all pages.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditArticleRow'
+
+    AuditActionResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        cluster_id:
+          type: string
+        source:
+          type: string
+        action_type:
+          type: string
+        aggregated_analysis_recomputed:
+          type: boolean
+          description: >
+            True when the action changed scores and the cluster's
+            aggregated_analysis was rebuilt. False for a plain approve.

@@ -60,6 +60,7 @@ def select_source_representatives(
         if current is not None and current.centroid_similarity >= similarity:
             continue
         best[article.source] = RepresentativeArticle(
+            title=article.title,
             url=article.url,
             published_at=article.published_at,
             content_fed_to_ai=None,

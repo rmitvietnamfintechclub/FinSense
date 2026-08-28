@@ -62,6 +62,24 @@ class APISettings(BaseSettings):
     MAX_PAGE_SIZE: int = 50
     SENTIMENT_BUCKET_THRESHOLD: float = 0.2
 
+    # Ticker detail page (FS-37)
+    TICKER_EVENTS_PAGE_SIZE: int = 5
+    TICKER_HISTORY_DAYS: list[int] = [7, 30, 90]
+    DEFAULT_TICKER_HISTORY_DAYS: int = 30
+
+    # Audit panel
+    AUDIT_PAGE_SIZE: int = 10
+
+    # Admin auth (audit panel). JWT_SECRET_KEY has NO usable default on purpose:
+    # a shipped default secret lets anyone forge an admin token, so an unset key
+    # must fail loudly at startup rather than quietly accept forged bearers.
+    JWT_SECRET_KEY: str = ""
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_HOURS: int = 8
+    # bcrypt truncates silently at 72 BYTES (not chars) — a longer password would
+    # authenticate on its first 72, so it is rejected at the boundary instead.
+    MAX_PASSWORD_BYTES: int = 72
+
     # CORS — the two Next.js apps. Browsers block cross-origin fetches without
     # this, so an unlisted frontend origin fails at preflight, not in the route.
     CORS_ORIGINS: list[str] = [

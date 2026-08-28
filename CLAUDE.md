@@ -62,9 +62,13 @@ price. Day boundaries are ICT (UTC+7) — see `utc_to_ict_date`. An event belong
 it would move events between days and stop past-day re-runs from reproducing their original score.
 
 **API** (`backend/api/`) — FastAPI, async via Motor. Reads MongoDB, never calls the LLM, never
-imports from `backend.pipeline`. One folder per domain under `features/` with
+imports from `backend.pipeline`. Four domains under `features/` — `auth`, `audit`, `dashboard`,
+`ticker`. (`events`/`history`/`internal` were removed on 2026-08-28: their endpoints live in
+`dashboard` and `ticker`, and `/api/health` sits in `main.py`. Don't re-create them.) Each has
 `router.py` / `schemas.py` / `service.py`, registered in `main.py`. `docs/openapi.yaml` is the
-contract source of truth (base path `/api`, bearer JWT on audit endpoints only).
+contract source of truth (base path `/api`, bearer JWT on every `/audit` endpoint; `POST
+/auth/login` is the only unauthenticated write). Spec and implementation are at full parity —
+14 endpoints each — so adding a route means editing the spec in the same change.
 
 Ticker live scores are computed **at request time** from `event_clusters`
 (`features/ticker/aggregator.py`); `daily_sentiment_history` only backs the historical chart.
@@ -72,7 +76,10 @@ Ticker live scores are computed **at request time** from `event_clusters`
 **Core** (`backend/core/`) — shared by both, must contain nothing specific to one. `formulas.py`
 holds all the scoring math (recency decay, time-weighted average, `blend_s_final`,
 `confidence_weighted_avg`) as pure functions so pipeline aggregation and API recomputation can't
-drift. `SFinalResult.is_empty` distinguishes "no events" from "genuinely neutral 0.0" — both render
+drift. `aggregation.py` holds `build_aggregated_analysis` for the same reason: it lived in the
+aggregate stage until the audit panel needed to rebuild a cluster's blend after a correction,
+and the API may not import from `backend.pipeline`. Both are imported by pipeline *and* API —
+never fork either. `SFinalResult.is_empty` distinguishes "no events" from "genuinely neutral 0.0" — both render
 differently and must not be collapsed. Sync client (`database.py`, PyMongo) for the pipeline, async
 (`database_async.py`, Motor) for the API.
 
@@ -114,8 +121,9 @@ by `frontend/types/generate.sh` and must never be hand-edited.
   `source_client.py` — nothing else changes.
 - **`bulk_write` cannot be unit-tested with mongomock.** pymongo 4.17's `UpdateOne` passes a `sort`
   argument mongomock 4.3.0 rejects, and 4.3.0 is the newest release; mongomock also doesn't
-  implement `array_filters` at all. Code using either (`scraper`, `extract`, `eod_batch`) needs a
-  hand-written fake collection — see `_FakeCollection` in `tests/unit/test_scraper.py`,
+  implement `array_filters` at all. Code using either (`scraper`, `extract`, `eod_batch`, and the
+  audit `PATCH` in `api/features/audit/service.py`) needs a hand-written fake collection — see
+  `_FakeCollection` in `tests/unit/test_scraper.py`,
   `FakeCollection` in `test_aggregate.py`, or `FakeHistoryCollection` in `test_eod_batch.py`, which
   also enforces a unique index so the upsert contract stays under test. This is why `cluster/stage.py` batches its reads but not
   its writes; that's deliberate, don't "fix" it into a broken state.

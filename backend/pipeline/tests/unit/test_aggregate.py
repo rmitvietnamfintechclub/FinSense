@@ -12,6 +12,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from backend.core.aggregation import build_aggregated_analysis
 from backend.core.config import pipeline_settings
 from backend.core.enums import Concept, Ticker
 from backend.core.formulas import confidence_weighted_avg
@@ -26,7 +27,6 @@ from backend.core.schemas.sentiment import (
     ConceptSentiment,
     TickerSentiment,
 )
-from backend.pipeline.stages.aggregate.event_aggregator import build_aggregated_analysis
 from backend.pipeline.stages.aggregate.stage import run_aggregate
 
 # --------------------------------------------------------------------------

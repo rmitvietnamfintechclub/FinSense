@@ -10,6 +10,11 @@ from backend.core.schemas.sentiment import AggregatedAnalysis, AIResponse
 
 
 class RepresentativeArticle(BaseModel):
+    # Nullable, never required: documents written before this field existed carry
+    # no title, and a required field would fail EventCluster.model_validate on
+    # every pre-existing cluster — taking down the cluster stage's carry-forward.
+    # Backfill by joining representative_article.url to articles.url.
+    title: str | None = None
     url: str
     published_at: datetime
     content_fed_to_ai: str | None = None

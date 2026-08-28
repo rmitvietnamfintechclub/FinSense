@@ -1,3 +1,12 @@
+"""Confidence-weighted blend of per-source extractions into a cluster's
+aggregated_analysis.
+
+Lives in core/, not the aggregate stage, because BOTH the pipeline (which
+computes it on ingest) and the API (which must recompute it when an admin
+corrects a source in the audit panel) need it, and the API may not import from
+backend.pipeline. Same reasoning as core/formulas.py — see ADR-001.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Sequence
