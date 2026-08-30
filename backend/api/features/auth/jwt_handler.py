@@ -33,6 +33,13 @@ def _require_secret(settings: APISettings) -> str:
     return settings.JWT_SECRET_KEY
 
 
+def verify_secret_configured(settings: APISettings = api_settings) -> None:
+    """Startup gate. Without it a deploy with no JWT_SECRET_KEY looks healthy —
+    /api/health returns ok, /docs renders — and only breaks when the first admin
+    tries to log in, as a 500 that says nothing useful."""
+    _require_secret(settings)
+
+
 def create_access_token(
     admin: CurrentAdmin,
     settings: APISettings = api_settings,

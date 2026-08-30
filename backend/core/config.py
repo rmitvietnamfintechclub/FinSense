@@ -24,6 +24,16 @@ class PipelineSettings(BaseSettings):
         ("VnExpress", "https://vnexpress.net/rss/kinh-doanh.rss"),
     ]
 
+    # Scraper pacing. 78 back-to-back requests earned 3 HTTP 429s from VnExpress
+    # on one run and 13 on the next, and the throttling escalates with repeated
+    # runs. Since run_pipeline resumes unfinished clusters, a body that fails to
+    # fetch is re-attempted every run until it ages out of CLUSTER_LOOKBACK_DAYS
+    # — on an hourly cron that is the unpaced version hammering a source that is
+    # already refusing it. Jitter as well as delay: a fixed interval from a cron
+    # firing on the hour hits the same source at the same offsets every time.
+    SCRAPER_DELAY_SECONDS: float = 1.0
+    SCRAPER_JITTER_SECONDS: float = 0.5
+
     # HTTP Settings
     HTTP_TIMEOUT: int = 10  # seconds, per request
     HTTP_HEADERS: dict[str, str] = {

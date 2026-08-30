@@ -596,6 +596,18 @@ components:
       nullable: true
       description: Continuous sentiment score. null means no valid events in window.
 
+    CorrectedScore:
+      type: number
+      format: float
+      minimum: -1.0
+      maximum: 1.0
+      description: >
+        A score supplied by an admin correction. Non-nullable, unlike
+        SentimentScore: v1 has no removal mechanism, so a correction always
+        carries a real score. A null is rejected with 400 — flag an entry the AI
+        should not have produced with error_type 'Wrong ticker' and leave its
+        score in place.
+
     # Frozen vocabularies — kept in sync by hand with backend/core/enums.py.
     # These are closed sets on purpose: historical sentiment records are labeled
     # against this exact vocabulary. Do not add/remove values here without a
@@ -961,22 +973,24 @@ components:
           description: Only include tickers being corrected — not the full list
           items:
             type: object
+            required: [ticker, score]
             properties:
               ticker:
                 $ref: '#/components/schemas/Ticker'
               score:
-                $ref: '#/components/schemas/SentimentScore'
+                $ref: '#/components/schemas/CorrectedScore'
         corrected_concept_sentiments:
           type: array
           nullable: true
           description: Only include concepts being corrected — not the full list
           items:
             type: object
+            required: [concept, score]
             properties:
               concept:
                 $ref: '#/components/schemas/Concept'
               score:
-                $ref: '#/components/schemas/SentimentScore'
+                $ref: '#/components/schemas/CorrectedScore'
 
     AuditLog:
       type: object

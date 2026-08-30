@@ -52,7 +52,8 @@ read on media tone — not a trading signal.
 - `sentence-transformers` (`intfloat/multilingual-e5-base`) for article embeddings
 
 **DevOps / Infrastructure**
-- GitHub Actions for CI (linting; more checks planned) and the nightly EOD batch
+- GitHub Actions — CI (ruff; a test job is still to be added), an hourly pipeline cron and a
+  nightly EOD batch cron. Neither schedule is live until it reaches the default branch.
 - Render (planned API hosting)
 - MongoDB Atlas (M0 free tier)
 
@@ -95,9 +96,9 @@ sentiment. A separate nightly batch then rolls the day's events into per-ticker 
 API reads from MongoDB to serve dashboards and handles admin corrections. Pipeline and API are
 decoupled — the pipeline never calls the API, and the API never calls the LLM.
 
-Both are designed to run on a cron, but only the EOD batch has a workflow with content today, and
-it is not live until it reaches the default branch. Runs are manual for now — see
-[`STATE.md`](STATE.md).
+Both run on a cron — hourly for the pipeline, 00:30 ICT nightly for the EOD rollup. Neither is
+live yet: scheduled workflows only fire from the default branch, and the repository has no Actions
+secrets, so runs are manual for now. See [`STATE.md`](STATE.md).
 
 For a stage-by-stage breakdown of the pipeline — algorithms, failure handling, and the design
 decisions behind them — see [`docs/PIPELINE.md`](docs/PIPELINE.md). For the database shape, see
@@ -125,8 +126,8 @@ Each part of the stack is set up and run independently. Follow the setup instruc
   pipeline and API
 - [`frontend/README.md`](frontend/README.md) — Node environment, running the web apps
 
-> **TODO:** `backend/README.md` and `frontend/README.md` do not exist yet in this repository.
-> Create them with component-specific setup steps before relying on this Quick Start section.
+> **TODO:** `frontend/README.md` does not exist yet — the frontend is unimplemented. Create it
+> with component-specific setup steps once that work starts.
 
 ### Running the Pipeline Locally
 
@@ -148,15 +149,24 @@ without the API or frontend:
    ```
 
 3. Populate `.env` at the project root (see `.env.example`) — at minimum `MONGODB_URI` and
-   `LLM_API_KEY` are required.
-4. Reset the dev database. This is a destructive operation, so it only runs if
+   `LLM_API_KEY` are required. Point `MONGODB_DB_NAME` at a database whose name contains `dev`.
+
+4. Create the collections and their indexes. Run once per database — the pipeline's upserts rely
+   on the unique indexes to stay idempotent, and skipping this doesn't fail loudly, it just lets
+   duplicates accumulate:
+
+   ```bash
+   python3 scripts/init_db.py
+   ```
+
+5. *Optional, and only to start over.* Reset the dev database. Destructive, so it refuses unless
    `MONGODB_DB_NAME` contains `dev` or `test`, and it asks for confirmation:
 
    ```bash
-   python3 -m scripts.reset_dev_db
+   python3 scripts/reset_dev_db.py
    ```
 
-5. Run the pipeline:
+6. Run the pipeline:
 
    ```bash
    python3 -m backend.pipeline.main
@@ -167,7 +177,7 @@ without the API or frontend:
    the extract stage makes one Gemini call per cluster per source — around 80 calls on a cold
    start — which will exhaust a free-tier key. It stops cleanly when the quota runs out.
 
-6. Optionally roll the day up into `daily_sentiment_history`:
+7. Optionally roll the day up into `daily_sentiment_history`:
 
    ```bash
    python3 -m backend.pipeline.eod_batch.eod_batch            # yesterday, ICT
@@ -179,14 +189,16 @@ without the API or frontend:
    VNDirect closing price. Events are keyed to the ICT day they were **created**, so re-running a
    past day reproduces the score that day first produced.
 
-For the full test suite and API setup (once implemented), see
+For the full test suite, API setup, environment reference and troubleshooting, see
 [`backend/README.md`](backend/README.md).
 
 ## Environment Variables
 
-A single `.env` file at the project root configures the backend (pipeline and, eventually, the
-API) — see `.env.example` for the required keys (MongoDB connection string, Gemini API key) and
-optional pipeline tuning parameters.
+A single `.env` file at the project root configures the whole backend — both the pipeline and the
+API. See `.env.example` for the required keys, and
+[`backend/README.md`](backend/README.md#environment-variables) for what each one does and which
+are worth tuning. At minimum you need `MONGODB_URI`, `LLM_API_KEY` (pipeline) and `JWT_SECRET_KEY`
+(the API refuses to start without it).
 
 The frontend does not yet have its own environment configuration — TODO once implementation
 starts.
@@ -195,15 +207,19 @@ Never commit `.env` files.
 
 ## API Documentation
 
-The API contract is defined in [`docs/openapi.yaml`](docs/openapi.yaml). Once the FastAPI service
-is implemented, interactive Swagger UI will be available at `/docs` (and ReDoc at `/redoc`) on
-the running API instance. Until then, `docs/openapi.yaml` is the source of truth for available
-endpoints, request/response shapes, and authentication.
+The API contract is defined in [`docs/openapi.yaml`](docs/openapi.yaml) — 14 endpoints, at full
+parity with the implementation, and the source the frontend's TypeScript types are generated from.
+Adding a route means editing the spec in the same change.
+
+Start the service with `uv run uvicorn backend.api.main:app --reload` and interactive docs are at
+`localhost:8000/docs` (Swagger) and `/redoc`. `GET /api/health` is the liveness check and touches
+no database.
 
 ## Development Workflow
 
 - Work is tracked via ticketed branches (`FS-<number>-short-description`).
-- Pull requests target `main` and must pass CI (`ruff check`) before merging.
+- Pull requests target `main` and must pass CI (`ruff check`) before merging. The test suite is
+  green but is **not** yet run by CI — run `uv run --extra dev python -m pytest -q` locally.
 - See [`.github/pull_request_template.md`](.github/pull_request_template.md) for the PR checklist.
 - Architectural decisions are recorded under [`docs/adr/`](docs/adr).
 

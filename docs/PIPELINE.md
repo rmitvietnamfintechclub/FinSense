@@ -13,6 +13,20 @@ each stage's output is durable before the next one starts. Stages also return th
 memory so the next stage can use it directly without re-reading — the Mongo write is for durability,
 the return value is for speed.
 
+Since 2026-08-29 the run is resumable *in practice*, not just in principle. Before scraping,
+`load_unfinished_clusters` pulls back any cluster from the last `CLUSTER_LOOKBACK_DAYS` that still
+has a source with no `ai_response`, or that has extractions but was never aggregated. Those join
+this run's fresh clusters, and `run_pipeline` stops only when there is neither new work nor
+unfinished work — not, as it used to, whenever RSS found no new articles.
+
+**The backlog goes first.** `work = resumed + clusters`, because extract stops the whole run on the
+first quota 429; with fresh clusters at the front, a rate-limited key would spend every run on new
+articles and let the backlog age out of the lookback window unfinished.
+
+Resumed clusters deliberately **do not** pass through `run_cluster`. That stage is the only writer
+of `updated_at`, which means "when an article last joined this event" and drives the dashboard's
+recency decay — finishing an extraction must not move it.
+
 ```mermaid
 flowchart TD
     A[RSS feeds<br/>CafeF · VnExpress] --> B[1. RSS<br/>fetch, normalize, dedup, filter]
@@ -121,7 +135,9 @@ in one feed pull.
 ### 4. Persist
 
 Survivors are written with `insert_many` and returned. **The write happens before any downstream
-stage runs**, which is what creates the resume gap documented at the end of this file.
+stage runs.** That ordering is why a crashed run cannot be repaired by re-reading the feed — the
+URLs are already ingested and will dedup away — and therefore why `load_unfinished_clusters` exists
+rather than the orchestrator simply retrying RSS.
 
 ---
 
@@ -219,6 +235,15 @@ only.
 **Entries that already have a body are skipped.** A cluster carried over from an earlier run keeps
 its `content_fed_to_ai`, and re-fetching it would spend a request on a body already held — which is
 how a re-run earns an HTTP 429 from the news site. This mirrors the guard extract has always had.
+
+**Fetches are paced.** `run_scraper` waits `SCRAPER_DELAY_SECONDS` plus a random
+`0..SCRAPER_JITTER_SECONDS` between requests (1.0s + 0..0.5s by default) — never before the first
+fetch, and never for a source it skips, since a skipped source makes no network call. 78 back-to-back
+requests earned 3 HTTP 429s from VnExpress on one run and 13 on the next, and the resume path now
+re-attempts a failed fetch every run, so an unpaced hourly cron would hammer a source that is
+already refusing it. Jitter matters as much as the delay: a fixed interval from a cron firing on the
+hour hits the same source at identical offsets every time. Costs a 78-fetch run roughly 80-120s;
+set both to `0` to disable.
 
 `source_client.fetch_body(source, url)` dispatches on the **lowercased** source name, so `"CafeF"`,
 `"cafef"` and `" VnExpress "` all resolve. An unknown source logs a warning and returns `None`
@@ -432,15 +457,15 @@ Gemini key in a single run.
 
 ## Known gaps
 
-- **A quota-killed run cannot be resumed.** `run_pipeline` returns early when RSS finds no new
-  articles, but RSS has already persisted this batch. If extraction dies partway, the next run sees
-  no new articles, stops immediately, and the half-finished clusters are never revisited — despite
-  both `run_scraper` and `run_extract` being written to resume. Recovery today is
-  `scripts/reset_dev_db.py`, which also discards scraped bodies and forces a full re-scrape. The fix
-  is to feed unfinished clusters into the stage list rather than gating on new articles.
-- **The scraper has no throttling.** 78 sequential requests with no delay, jitter, or backoff earned
-  3 HTTP 429s from VnExpress on one run and 13 on the next. There is no rate limiting anywhere in
-  `stages/scraper/`.
+- **A failed fetch is indistinguishable from one not yet attempted.** `fetch_body` returns `None`
+  on failure and the stage logs it and moves on; nothing marks the source as failed, so
+  `content_fed_to_ai` simply stays unset. The resume path therefore treats a permanently
+  unreachable URL as unfinished work and re-attempts it on every run until the cluster ages out of
+  `CLUSTER_LOOKBACK_DAYS` — up to ~72 times on an hourly cron. Pacing bounds the *rate* of those
+  attempts, not the total. Stopping them needs a per-source attempt counter, which means a new field
+  on `source_breakdown` and so a schema change.
+- **No backoff on a 429 specifically.** Pacing is a constant delay regardless of how the source is
+  responding; a run that starts getting rate-limited does not slow down further.
 - **The clustering threshold sits on a cliff.** Real-data pairwise similarity is very tightly
   distributed (p50 0.81, p99 0.90, max 0.96), so 0.91 sits above the 99th percentile. Dropping to
   0.88 collapses 109 articles into 36 clusters with a 56-article blob; 0.86 gives 4 clusters. Do not

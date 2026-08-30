@@ -119,6 +119,30 @@ by `frontend/types/generate.sh` and must never be hand-edited.
   alongside it. Evaluation scores bucket agreement, not float equality.
 - New scraper source: add an adapter under `stages/scraper/adapters/` and register it in
   `source_client.py` — nothing else changes.
+- **`updated_at` has exactly one writer**: `build_event_cluster` in the cluster stage, persisted by
+  `save_event_cluster`'s whole-document `$set`. It means "when an article last joined this event"
+  and drives the API's recency decay and the cluster lookback. `run_pipeline` resumes unfinished
+  clusters through scrape/extract/aggregate — all of which `$set` narrow paths only — and
+  deliberately **never** routes them back through `run_cluster`. Finishing an extraction must not
+  move `updated_at`.
+- **The resume backlog goes first.** `work = resumed + clusters` in `run_pipeline`. `run_extract`
+  stops the whole run on the first quota 429, so fresh-first would let a rate-limited key spend
+  every run on new articles while the backlog ages out of `CLUSTER_LOOKBACK_DAYS` unfinished.
+- **A failed scrape is not marked.** `fetch_body` returns `None` and the stage moves on, so
+  "fetch failed" and "not fetched yet" are the same state. That is why the resume query re-attempts
+  it every run, and why `run_scraper` paces requests (`SCRAPER_DELAY_SECONDS` + jitter). Pacing
+  bounds the rate, not the total; a ceiling needs a per-source attempt counter, i.e. a schema change.
+- **A null score in an audit correction is refused with 400**, not merged. `AuditAction` reuses the
+  nullable `TickerScore`, but `ai_response` scores are non-nullable, so merging a null used to
+  escape `_rebuild_analysis` as an uncaught `ValidationError`. The spec has a separate non-nullable
+  `CorrectedScore` for corrections; keep the two apart — `SentimentScore` stays nullable where a
+  null legitimately means "no data".
+- **Prefer mongomock over a hand-written fake for read paths.** `find`, `$elemMatch`, `$size`,
+  `$exists` and aggregation pipelines all behave correctly, so the query gets executed rather than
+  re-asserted — see `test_dashboard.py` (async facade over mongomock) and `test_main.py`. Build the
+  client `tz_aware=True` to match `database_async.py`, or datetimes come back naive. One trap:
+  mongomock and real MongoDB disagree about whether `{"$in": [None, []]}` matches an empty array,
+  so use `$size`/`$exists`, which agree. Writes are the exception —
 - **`bulk_write` cannot be unit-tested with mongomock.** pymongo 4.17's `UpdateOne` passes a `sort`
   argument mongomock 4.3.0 rejects, and 4.3.0 is the newest release; mongomock also doesn't
   implement `array_filters` at all. Code using either (`scraper`, `extract`, `eod_batch`, and the

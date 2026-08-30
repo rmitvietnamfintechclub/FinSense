@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 import backend.pipeline.stages.scraper.stage as scraper_stage
+from backend.core.config import pipeline_settings
 
 
 # --- fakes -----------------------------------------------------------------
@@ -24,6 +27,14 @@ def _cluster(cluster_id: str, *breakdowns):
 def _fake_fetch(mapping: dict[str, str | None]):
     """fetch_body stub driven by a url -> body lookup. Unknown urls yield None."""
     return lambda source, url: mapping.get(url)
+
+
+@pytest.fixture(autouse=True)
+def _no_pacing(monkeypatch):
+    """The tests below predate scraper pacing and are not about it — zero the
+    delay so they stay instant. TestScraperPacing sets its own values."""
+    monkeypatch.setattr(pipeline_settings, "SCRAPER_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(pipeline_settings, "SCRAPER_JITTER_SECONDS", 0.0)
 
 
 class _FakeCollection:
@@ -211,3 +222,96 @@ class TestRunScraper:
         )
 
         assert calls == [("CafeF", "https://cafef.vn/a")]
+
+
+
+class TestScraperPacing:
+    """78 back-to-back requests earned 3 HTTP 429s from VnExpress on one run and
+    13 on the next. run_pipeline now resumes unfinished clusters, so a body that
+    fails to fetch is re-attempted every run until it ages out — unpaced, an
+    hourly cron would hammer a source that is already refusing it."""
+
+    @staticmethod
+    def _recorder():
+        waits: list[float] = []
+        return waits, waits.append
+
+    @staticmethod
+    def _pending(*ids):
+        return [_cluster(i, _breakdown("CafeF", f"https://x/{i}")) for i in ids]
+
+    @pytest.fixture
+    def paced(self, monkeypatch):
+        def _set(delay: float, jitter: float = 0.0):
+            monkeypatch.setattr(pipeline_settings, "SCRAPER_DELAY_SECONDS", delay)
+            monkeypatch.setattr(pipeline_settings, "SCRAPER_JITTER_SECONDS", jitter)
+
+        return _set
+
+    def test_waits_between_fetches(self, monkeypatch, paced):
+        monkeypatch.setattr(scraper_stage, "fetch_body", lambda source, url: "body")
+        paced(2.0)
+        waits, sleep = self._recorder()
+
+        scraper_stage.run_scraper(
+            self._pending("a", "b", "c"), _FakeCollection(), sleep=sleep
+        )
+
+        # Three fetches, two gaps — never before the first, never after the last.
+        assert waits == [2.0, 2.0]
+
+    def test_a_single_fetch_never_waits(self, monkeypatch, paced):
+        monkeypatch.setattr(scraper_stage, "fetch_body", lambda source, url: "body")
+        paced(2.0)
+        waits, sleep = self._recorder()
+
+        scraper_stage.run_scraper(self._pending("a"), _FakeCollection(), sleep=sleep)
+
+        assert waits == []
+
+    def test_jitter_is_added_on_top_of_the_delay(self, monkeypatch, paced):
+        monkeypatch.setattr(scraper_stage, "fetch_body", lambda source, url: "body")
+        paced(1.0, 0.5)
+        waits, sleep = self._recorder()
+
+        scraper_stage.run_scraper(
+            self._pending(*"abcdefgh"), _FakeCollection(), sleep=sleep
+        )
+
+        assert all(1.0 <= w <= 1.5 for w in waits)
+        # Not a constant interval — a cron firing on the hour would otherwise hit
+        # the same source at the same offsets on every run.
+        assert len(set(waits)) > 1
+
+    def test_a_failed_fetch_still_paces_the_next_one(self, monkeypatch, paced):
+        # The failing case is the one that matters: a 429 must not turn the rest
+        # of the run into a tight retry loop.
+        monkeypatch.setattr(scraper_stage, "fetch_body", lambda source, url: None)
+        paced(2.0)
+        waits, sleep = self._recorder()
+
+        scraper_stage.run_scraper(self._pending("a", "b"), _FakeCollection(), sleep=sleep)
+
+        assert waits == [2.0]
+
+    def test_an_already_scraped_source_costs_no_wait(self, monkeypatch, paced):
+        # Pacing spaces out network calls; a skipped source makes none.
+        monkeypatch.setattr(scraper_stage, "fetch_body", lambda source, url: "body")
+        paced(2.0)
+        done = _cluster("done", _breakdown("CafeF", "https://x/done", "already here"))
+        waits, sleep = self._recorder()
+
+        scraper_stage.run_scraper(
+            [done, *self._pending("new")], _FakeCollection(), sleep=sleep
+        )
+
+        assert waits == []
+
+    def test_zero_delay_and_zero_jitter_disables_pacing(self, monkeypatch, paced):
+        monkeypatch.setattr(scraper_stage, "fetch_body", lambda source, url: "body")
+        paced(0.0, 0.0)
+        waits, sleep = self._recorder()
+
+        scraper_stage.run_scraper(self._pending("a", "b"), _FakeCollection(), sleep=sleep)
+
+        assert waits == []
