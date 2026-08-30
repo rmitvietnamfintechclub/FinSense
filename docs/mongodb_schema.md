@@ -94,7 +94,8 @@ Core collection. One document per event. Written by pipeline, read by serving AP
         "model_version": "string — e.g. 'gemini-1.5-flash'",
         "prompt_version": "string - e.g. 'v1'",
       },
-      "is_audited": "boolean — false until admin approves or corrects",
+      "audited_response": "object | null — same shape as ai_response. Null until an admin corrects this source. Present means an admin changed the scores: ai_response is NEVER rewritten, so the model's own output stays recoverable for the accuracy evaluation. Every reader resolves the pair through backend/core/corrections.py::effective_response (audited_response wins), including the pipeline's re-aggregation and the EOD batch",
+      "is_audited": "boolean — false until admin approves or corrects. True after a plain approve too, which leaves audited_response null",
     }
   ]
 }

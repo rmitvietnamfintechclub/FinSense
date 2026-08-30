@@ -115,6 +115,32 @@ class TickerEventItem(BaseModel):
 
 class TickerEvents(BaseModel):
     ticker: str
+    window: str
     page: int
     has_more: bool
-    items: list[TickerEventItem] = Field(..., description="Newest first (updated_at desc) — full history, not window-scoped")
+    items: list[TickerEventItem] = Field(..., description="Newest first (updated_at desc), scoped to `window`")
+
+
+# ============================================================
+# GET /api/tickers — the VN30 directory
+# ============================================================
+
+
+class TickerDirectoryEntry(BaseModel):
+    ticker: str
+    company_name: str
+    aliases: list[str] = Field(
+        ...,
+        description=(
+            "Every name this company is known by, Vietnamese included. The "
+            "search box matches against these as well as the symbol, so typing "
+            "'Hoa Phat' finds HPG."
+        ),
+    )
+
+
+class TickerDirectory(BaseModel):
+    """Unpaginated on purpose: the VN30 basket is exactly 30 rows and the search
+    box needs all of them client-side to match as the user types."""
+
+    tickers: list[TickerDirectoryEntry]

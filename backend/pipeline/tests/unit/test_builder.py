@@ -10,6 +10,7 @@ import pytest
 
 from backend.core.schemas.article import Article
 from backend.core.schemas.event_cluster import EventCoverage, RepresentativeArticle
+from backend.core.schemas.sentiment import AIResponse, TickerSentiment
 from backend.pipeline.stages.cluster.clustering import Cluster
 from backend.pipeline.stages.cluster.stage import (
     backfill_article_cluster_ids,
@@ -156,7 +157,8 @@ def test_build_event_cluster_from_scratch():
     assert set(result.event_coverage.all_urls.keys()) == {"CafeF", "VnExpress"}
     assert len(result.source_breakdown) == 2
     assert all(
-        b.ai_response is None and b.is_audited is False for b in result.source_breakdown
+        b.ai_response is None and b.audited_response is None and b.is_audited is False
+        for b in result.source_breakdown
     )
     assert result.created_at == result.updated_at
     assert all(
@@ -189,6 +191,46 @@ def test_build_event_cluster_merges_with_existing():
     assert set(updated.event_coverage.all_urls.keys()) == {"CafeF", "VnExpress"}
     assert len(updated.source_breakdown) == 2
     assert updated.centroid_embedding == pytest.approx([0.95, 0.05])
+
+
+def test_build_event_cluster_carries_forward_an_admin_correction():
+    """A new article joining an already-audited event must not revert it. The
+    rewrite replaces the whole source_breakdown, so anything not carried across
+    here is silently destroyed on the next pipeline run."""
+    first_articles = [_article("HPG steel news", "http://a/1", "CafeF")]
+    first_embeddings = np.array([[1.0, 0.0]], dtype=np.float32)
+    first_cluster = Cluster(
+        "evt_hpg", np.array([1.0, 0.0]), article_count=1, article_indices=[0]
+    )
+    existing = build_event_cluster(first_articles, first_embeddings, first_cluster)
+
+    audited = AIResponse(
+        ticker_sentiments=[TickerSentiment(ticker="HPG", score=-0.2)],
+        concept_sentiments=[],
+        ai_confidence=0.9,
+        model_version="gemini-2.0-flash",
+        prompt_version="v3",
+    )
+    existing.source_breakdown[0].ai_response = audited.model_copy(
+        update={"ticker_sentiments": [TickerSentiment(ticker="HPG", score=-0.9)]}
+    )
+    existing.source_breakdown[0].audited_response = audited
+    existing.source_breakdown[0].is_audited = True
+
+    second_articles = [_article("HPG steel again", "http://a/2", "CafeF")]
+    second_embeddings = np.array([[0.99, 0.01]], dtype=np.float32)
+    second_cluster = Cluster(
+        "evt_hpg", np.array([0.99, 0.01]), article_count=2, article_indices=[0]
+    )
+    updated = build_event_cluster(
+        second_articles, second_embeddings, second_cluster, existing=existing
+    )
+
+    cafef = next(b for b in updated.source_breakdown if b.source == "CafeF")
+    assert cafef.is_audited is True
+    assert cafef.audited_response is not None
+    assert cafef.audited_response.ticker_sentiments[0].score == -0.2
+    assert cafef.ai_response.ticker_sentiments[0].score == -0.9, "the AI's record stays"
 
 
 def test_build_event_cluster_requires_articles_or_existing():

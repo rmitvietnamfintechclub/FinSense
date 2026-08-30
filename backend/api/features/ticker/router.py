@@ -7,12 +7,14 @@ from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 
 from backend.api.features.ticker.schemas import (
     TickerDetail,
+    TickerDirectory,
     TickerEvents,
     TickerHistory,
     TickerSentimentResponse,
 )
 from backend.api.features.ticker.service import (
     get_ticker_detail,
+    get_ticker_directory,
     get_ticker_events,
     get_ticker_history,
     get_ticker_sentiment,
@@ -22,6 +24,9 @@ from backend.core.database_async import get_db
 from backend.core.enums import Ticker
 
 router = APIRouter(prefix="/api/ticker", tags=["ticker"])
+# Separate router because the path is plural and takes no {symbol}; mounting it
+# under /api/ticker would collide with the {symbol} path param.
+directory_router = APIRouter(prefix="/api/tickers", tags=["ticker"])
 EVENT_CLUSTERS_COLLECTION = "event_clusters"
 
 
@@ -105,10 +110,23 @@ async def read_ticker_history(
 @router.get("/{symbol}/events", response_model=TickerEvents)
 async def read_ticker_events(
     symbol: SymbolDep,
+    window: WindowDep,
     db: DbDep,
     page: int = Query(1, ge=1),
 ) -> TickerEvents:
-    return await get_ticker_events(db, symbol=symbol, page=page)
+    return await get_ticker_events(db, symbol=symbol, page=page, window=window)
+
+
+# ============================================================
+# GET /api/tickers — the VN30 directory, for the search box
+# ============================================================
+
+
+@directory_router.get("", response_model=TickerDirectory)
+def read_ticker_directory() -> TickerDirectory:
+    """Not async: it reads a cached in-process dict, never the database, so an
+    async def would only add an event-loop hop."""
+    return get_ticker_directory()
 
 
 # ============================================================

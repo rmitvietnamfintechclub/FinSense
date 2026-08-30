@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from backend.api.features.dashboard.schemas import (
+    EventArticle,
+    EventArticles,
     EventItem,
     EventsResponse,
     GaugeResponse,
@@ -13,7 +15,8 @@ from backend.api.features.dashboard.schemas import (
     TickersResponse,
 )
 from backend.api.features.ticker.aggregator import age_in_hours, assemble_live_sentiment
-from backend.core.config import APISettings, api_settings
+from backend.core.config import APISettings, api_settings, pipeline_settings
+from backend.core.corrections import effective_response_raw
 from backend.core.enums import Ticker
 from backend.core.formulas import (
     bucket_sentiment,
@@ -22,6 +25,7 @@ from backend.core.formulas import (
     time_weighted_average,
 )
 from backend.core.lexicon import get_concept_weights
+from backend.core.ticker_metadata import get_ticker_dictionary
 
 EVENT_CLUSTERS_COLLECTION = "event_clusters"
 ARTICLES_COLLECTION = "articles"
@@ -32,8 +36,11 @@ def _window_start(window: str, now: datetime) -> datetime:
     return now - timedelta(hours=api_settings.WINDOW_HOURS[window])
 
 
-def _event_score(event: dict) -> float | None:
-    analysis = event.get("aggregated_analysis") or {}
+def _mean_score(analysis: dict) -> float | None:
+    """Flat mean of every ticker and concept score in a ticker/concept block.
+    Used for both the cluster's aggregated_analysis and a single source's
+    extraction, so an expanded article and the event it sits under are scored
+    the same way and cannot disagree in sign."""
     scores = [
         e["score"]
         for key in ("ticker_sentiments", "concept_sentiments")
@@ -41,6 +48,10 @@ def _event_score(event: dict) -> float | None:
         if e.get("score") is not None
     ]
     return sum(scores) / len(scores) if scores else None
+
+
+def _event_score(event: dict) -> float | None:
+    return _mean_score(event.get("aggregated_analysis") or {})
 
 
 def _source_counts(event: dict) -> dict[str, int]:
@@ -179,6 +190,7 @@ async def get_tickers(
             TickerItem(
                 rank=skip + offset + 1,
                 ticker=ticker,
+                company_name=get_ticker_dictionary()[Ticker(ticker)].display_name,
                 event_count=row["event_count"],
                 sentiment_score=round(clamp_score(result.score), 4),
                 is_empty=result.is_empty,
@@ -187,4 +199,57 @@ async def get_tickers(
 
     return TickersResponse(
         window=window, page=page, limit=limit, has_more=has_more, tickers=items
+    )
+
+
+class EventNotFoundError(Exception):
+    """No cluster with that id."""
+
+
+async def get_event_articles(
+    db: AsyncIOMotorDatabase,
+    cluster_id: str,
+    settings: APISettings = api_settings,
+) -> EventArticles:
+    """Backs the dashboard's expand-in-place row. Not window-scoped: the row was
+    already selected by a windowed query, and re-filtering its own contents by
+    time would make an event expand into nothing.
+
+    Sub-threshold sources are excluded, matching the ticker detail page and
+    matching what aggregated_analysis was actually blended from — showing a
+    source the score ignored would explain the number wrongly.
+    """
+    event = await db[EVENT_CLUSTERS_COLLECTION].find_one({"cluster_id": cluster_id})
+    if event is None:
+        raise EventNotFoundError(f"No event cluster {cluster_id!r}")
+
+    threshold = pipeline_settings.AI_CONFIDENCE_THRESHOLD
+    event_title = event.get("event_title") or ""
+    articles: list[EventArticle] = []
+
+    for source in event.get("source_breakdown") or []:
+        # An admin correction has to be visible on the public dashboard too.
+        response = effective_response_raw(source) or {}
+        confidence = response.get("ai_confidence")
+        if confidence is None or confidence < threshold:
+            continue
+        rep = source.get("representative_article") or {}
+        articles.append(
+            EventArticle(
+                source=source.get("source") or "",
+                article_title=rep.get("title") or event_title,
+                article_url=rep.get("url") or "",
+                published_at=rep.get("published_at") or event["created_at"],
+                score=_mean_score(response),
+                ai_confidence=confidence,
+            )
+        )
+
+    articles.sort(key=lambda a: a.published_at, reverse=True)
+    return EventArticles(
+        cluster_id=cluster_id,
+        event_title=event_title,
+        total_articles=(event.get("event_coverage") or {}).get("total_articles") or 0,
+        articles_shown=len(articles),
+        articles=articles,
     )

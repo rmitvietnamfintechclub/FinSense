@@ -101,7 +101,7 @@ live yet: scheduled workflows only fire from the default branch, and the reposit
 secrets, so runs are manual for now. See [`STATE.md`](STATE.md).
 
 For a stage-by-stage breakdown of the pipeline — algorithms, failure handling, and the design
-decisions behind them — see [`docs/PIPELINE.md`](docs/PIPELINE.md). For the database shape, see
+decisions behind them — see [`backend/PIPELINE.md`](backend/PIPELINE.md). For the database shape, see
 [`docs/mongodb_schema.md`](docs/mongodb_schema.md). The REST contract — every endpoint, its
 parameters and response shape — is [`docs/openapi.yaml`](docs/openapi.yaml), which is the
 source of truth the frontend types are generated from. A broader

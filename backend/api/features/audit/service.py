@@ -34,6 +34,7 @@ from backend.api.features.audit.schemas import (
 from backend.api.features.auth.schemas import CurrentAdmin
 from backend.core.aggregation import build_aggregated_analysis
 from backend.core.config import APISettings, api_settings, pipeline_settings
+from backend.core.corrections import effective_response_raw
 from backend.core.schemas.event_cluster import SourceBreakdown
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,10 @@ def _coerce_scores(raw: list[dict], model, key: str, cluster_id: str) -> list:
 def _row_from_flat(doc: dict) -> AuditArticleRow:
     sb = doc["source_breakdown"]
     ai = sb.get("ai_response") or {}
+    # Current values are the admin's where one exists; the AI's are returned
+    # alongside so the correction form can always show what it is changing FROM,
+    # including on a second correction of the same row.
+    effective = effective_response_raw(sb) or {}
     rep = sb.get("representative_article") or {}
     last = doc.get("last_audit")
     cluster_id = doc.get("cluster_id") or ""
@@ -132,14 +137,16 @@ def _row_from_flat(doc: dict) -> AuditArticleRow:
         # missing its own published_at degrades to the cluster's date rather than
         # raising KeyError and taking down the whole response.
         published_at=rep.get("published_at") or doc["created_at"],
-        ticker_count=len(ai.get("ticker_sentiments") or []),
+        ticker_count=len(effective.get("ticker_sentiments") or []),
         ai_confidence=ai.get("ai_confidence") if ai.get("ai_confidence") is not None else 0.0,
         is_audited=bool(sb.get("is_audited")),
         content_fed_to_ai=rep.get("content_fed_to_ai"),
         model_version=ai.get("model_version") or "",
         prompt_version=ai.get("prompt_version") or "",
-        ticker_sentiments=_coerce_scores(ai.get("ticker_sentiments"), TickerScore, "ticker", cluster_id),
-        concept_sentiments=_coerce_scores(ai.get("concept_sentiments"), ConceptScore, "concept", cluster_id),
+        ticker_sentiments=_coerce_scores(effective.get("ticker_sentiments"), TickerScore, "ticker", cluster_id),
+        concept_sentiments=_coerce_scores(effective.get("concept_sentiments"), ConceptScore, "concept", cluster_id),
+        original_ticker_sentiments=_coerce_scores(ai.get("ticker_sentiments"), TickerScore, "ticker", cluster_id),
+        original_concept_sentiments=_coerce_scores(ai.get("concept_sentiments"), ConceptScore, "concept", cluster_id),
         last_audit=(
             LastAudit(
                 admin_name=last.get("admin_name") or "",
@@ -333,8 +340,11 @@ async def apply_audit_action(
             f"Source {source!r} has no ai_response — there is nothing to audit yet"
         )
 
-    old_tickers = list(ai_response.get("ticker_sentiments") or [])
-    old_concepts = list(ai_response.get("concept_sentiments") or [])
+    # Corrections stack: a second correction edits the first admin's numbers,
+    # not the AI's, so audit_log's old_* records what actually changed.
+    base_response = effective_response_raw(entry) or ai_response
+    old_tickers = list(base_response.get("ticker_sentiments") or [])
+    old_concepts = list(base_response.get("concept_sentiments") or [])
 
     is_correction = action.action_type == "correct"
     new_tickers = (
@@ -353,8 +363,15 @@ async def apply_audit_action(
 
     set_fields: dict[str, Any] = {"source_breakdown.$[entry].is_audited": True}
     if scores_changed:
-        set_fields["source_breakdown.$[entry].ai_response.ticker_sentiments"] = new_tickers
-        set_fields["source_breakdown.$[entry].ai_response.concept_sentiments"] = new_concepts
+        # A whole AIResponse, not just the two score lists: audited_response has
+        # to validate on its own, and it carries the confidence/model/prompt of
+        # the run being corrected so the two stay comparable. ai_response is
+        # never in the $set — that is the point of the split.
+        set_fields["source_breakdown.$[entry].audited_response"] = {
+            **base_response,
+            "ticker_sentiments": new_tickers,
+            "concept_sentiments": new_concepts,
+        }
 
         # The dashboard and ticker pages read aggregated_analysis, never
         # source_breakdown — without this rebuild the correction would be
@@ -404,6 +421,10 @@ def _rebuild_analysis(
     """Rebuilds the cluster blend from ALL its sources, with the corrected one
     substituted in. Uses core.aggregation — the same function the pipeline runs —
     so an admin correction and a pipeline run can never produce different maths.
+
+    The substitution goes into audited_response because that is what
+    core.aggregation resolves first; writing it to ai_response here would
+    reproduce the right number by destroying the record it came from.
     """
     breakdowns: list[SourceBreakdown] = []
     for sb in cluster.get("source_breakdown") or []:
@@ -411,8 +432,8 @@ def _rebuild_analysis(
             continue
         patched = dict(sb)
         if sb.get("source") == source:
-            patched["ai_response"] = {
-                **sb["ai_response"],
+            patched["audited_response"] = {
+                **(effective_response_raw(sb) or sb["ai_response"]),
                 "ticker_sentiments": new_tickers,
                 "concept_sentiments": new_concepts,
             }

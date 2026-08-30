@@ -107,8 +107,20 @@ class AuditArticleRow(BaseModel):
     )
     model_version: str
     prompt_version: str
-    ticker_sentiments: list[TickerScore]
+    ticker_sentiments: list[TickerScore] = Field(
+        ..., description="Current values — the admin's where this row has been corrected, otherwise the AI's. These pre-fill the editable boxes."
+    )
     concept_sentiments: list[ConceptScore]
+    original_ticker_sentiments: list[TickerScore] = Field(
+        default_factory=list,
+        description=(
+            "Always the AI's own output, never overwritten. This is the "
+            "unchangeable reference shown beside each editable box, and it stays "
+            "correct on a re-edit — ai_response is immutable, corrections live in "
+            "audited_response."
+        ),
+    )
+    original_concept_sentiments: list[ConceptScore] = Field(default_factory=list)
     last_audit: LastAudit | None = None
 
 

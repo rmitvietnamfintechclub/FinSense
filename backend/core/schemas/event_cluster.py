@@ -27,7 +27,12 @@ class RepresentativeArticle(BaseModel):
 class SourceBreakdown(BaseModel):
     source: str
     representative_article: RepresentativeArticle
+    # What the AI said. Written once by the extract stage and never rewritten —
+    # an admin correction lands in audited_response instead, so the accuracy
+    # evaluation can always recover the model's own output. Read the pair
+    # through core.corrections.effective_response, never ai_response directly.
     ai_response: AIResponse | None = None
+    audited_response: AIResponse | None = None
     is_audited: bool = False
 
 

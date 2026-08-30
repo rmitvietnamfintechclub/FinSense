@@ -4,7 +4,7 @@ Current status of the repo. **Everything here is verified against the tree, not 
 docs** — a lot of this project is deliberately-seeded empty scaffolding, so a path existing is not
 evidence a feature exists.
 
-Architecture lives in `CLAUDE.md`, the pipeline's internals in `docs/PIPELINE.md`. This file only
+Architecture lives in `CLAUDE.md`, the pipeline's internals in `backend/PIPELINE.md`. This file only
 tracks *what works right now*.
 
 **Last verified: 2026-08-30.** Re-verify before trusting anything below if the date is stale:
@@ -21,11 +21,11 @@ find . -path ./.venv -prune -o -name '*.py' -size -1c -print   # find the empty 
 |---|---|
 | Pipeline `rss → cluster → scraper → extract → aggregate` | **Verified end to end on live data.** Resumable since 2026-08-29 — `run_pipeline` gates on outstanding work, not on new articles. Fetches paced since 2026-08-30 |
 | EOD batch (`pipeline/eod_batch/`) + VNDirect price adapter | Reviewed and hardened 2026-08-25; suite green, **never run against real data** |
-| API — ticker + dashboard features | Implemented and runnable; **smoke-tested against live Atlas data 2026-08-28** |
+| API — ticker + dashboard features | Implemented and runnable; **smoke-tested against live Atlas data 2026-08-28.** Three additions 2026-08-30 for the frontend sprint: `GET /api/tickers`, `GET /api/dashboard/events/{cluster_id}/articles`, and a `window` param on `/ticker/{symbol}/events` — none smoke-tested against Atlas yet |
 | API — auth | **Implemented.** `POST /api/auth/login` (JWT, bcrypt) + `audit/guard.py::require_admin`. The app refuses to boot without `JWT_SECRET_KEY` (2026-08-30). **No admin seeded yet** — run `scripts/seed_admins.py` before first login |
-| API — audit | **Implemented.** `/audit/summary`, `/audit/articles`, `PATCH /audit/events/{cluster_id}/{source}`, `/audit/log`. Read paths verified against live Atlas data; the PATCH write path is covered by unit tests only |
-| Docs | `README.md`, `backend/README.md`, `PIPELINE.md`, `FOLDER_STRUCTURE_GUIDANCE.md`, `mongodb_schema.md`, `CLAUDE.md` swept 2026-08-30. `frontend/README.md` and `docs/ARCHITECTURE.md` still missing |
-| API — contract parity | **14 documented endpoints, 14 implemented, zero drift** against `docs/openapi.yaml` |
+| API — audit | **Implemented.** `/audit/summary`, `/audit/articles`, `PATCH /audit/events/{cluster_id}/{source}`, `/audit/log`. Read paths verified against live Atlas data; the PATCH write path is covered by unit tests only. Corrections write `source_breakdown[].audited_response` since 2026-08-30 — `ai_response` is now immutable |
+| Docs | `README.md`, `backend/README.md`, `backend/PIPELINE.md`, `FOLDER_STRUCTURE_GUIDANCE.md`, `mongodb_schema.md`, `CLAUDE.md` swept 2026-08-30; `backend/ENDPOINTS.md` (all 16 endpoints, one table) added 2026-08-30. `PIPELINE.md` and `ENDPOINTS.md` moved out of `docs/` to `backend/` on 2026-08-30. `frontend/README.md` and `docs/ARCHITECTURE.md` still missing |
+| API — contract parity | **16 documented endpoints, 16 implemented, zero drift** against `docs/openapi.yaml` |
 | Frontend (both apps, `ui/`, `types/`) | Every file 0 bytes — cannot be installed or run |
 | Evaluation harness | Only `cluster_threshold.py` works; runner/metrics empty, no ground truth |
 
@@ -48,8 +48,7 @@ below.
 
 ## Health
 
-- **Test suite: 415 passing, 0 failing, 10 skipped — green as of 2026-08-30**, for the first time
-  in this repo's history. `test_dashboard.py` was rewritten that day: the old file predated the
+- **Test suite: 434 passing, 0 failing, 10 skipped — green as of 2026-08-30.** `test_dashboard.py` was rewritten that day: the old file predated the
   sync->async migration, monkeypatched a `service.get_database` that no longer exists, and all 15
   of its tests failed. All four dashboard endpoints now have coverage (23 tests).
 - `test_dashboard.py` and `test_main.py` drive async services with `asyncio.run()` from sync test
@@ -66,6 +65,10 @@ below.
 - `test_jwt_handler.py` (19), `test_guard.py` (13) and `test_audit.py` (36) are green — auth and
   the audit panel are the best-covered API areas. The audit PATCH write path is fake-collection
   only; `array_filters` cannot run under mongomock (see CLAUDE.md).
+- The `audited_response` split (2026-08-30) is covered at every layer it touches: the audit write
+  path asserts no `$set` reaches `ai_response`, the read path asserts `original_ticker_sentiments`
+  survives a re-edit, `test_builder.py` asserts a correction survives a cluster rewrite, and
+  `test_dashboard.py` asserts a correction reaches the public event-article list.
 - No test execution in CI at all; `ci.yml` runs ruff and nothing else.
 
 ## Known broken / blocked
@@ -190,7 +193,7 @@ Seeded ahead of implementation, all 0 bytes:
 
 Trust the tree over the docs.
 
-**Docs were swept on 2026-08-30** — `README.md`, `backend/README.md`, `docs/PIPELINE.md`,
+**Docs were swept on 2026-08-30** — `README.md`, `backend/README.md`, `backend/PIPELINE.md`,
 `docs/FOLDER_STRUCTURE_GUIDANCE.md`, `docs/mongodb_schema.md` and `CLAUDE.md` all reflect the tree
 as of that date. What is still knowingly out of step:
 

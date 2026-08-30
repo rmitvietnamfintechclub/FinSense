@@ -174,7 +174,7 @@ class TestCorrect:
             corrected_ticker_sentiments=[{"ticker": "HPG", "score": -0.2}],
         ))
         _, update, _ = db.clusters.updates[0]
-        new = update["$set"]["source_breakdown.$[entry].ai_response.ticker_sentiments"]
+        new = update["$set"]["source_breakdown.$[entry].audited_response"]["ticker_sentiments"]
         assert {"ticker": "HPG", "score": -0.2} in new
         assert {"ticker": "VNM", "score": -0.25} in new, "untouched ticker must survive"
 
@@ -186,7 +186,7 @@ class TestCorrect:
             corrected_ticker_sentiments=[{"ticker": "VNM", "score": 0.4}],
         ))
         _, update, _ = db.clusters.updates[0]
-        new = update["$set"]["source_breakdown.$[entry].ai_response.ticker_sentiments"]
+        new = update["$set"]["source_breakdown.$[entry].audited_response"]["ticker_sentiments"]
         assert {"ticker": "VNM", "score": 0.4} in new
 
     def test_v1_has_no_removal_wrong_ticker_keeps_its_score(self):
@@ -204,9 +204,59 @@ class TestCorrect:
             corrected_ticker_sentiments=[{"ticker": "HPG", "score": -0.4}],
         ))
         _, update, _ = db.clusters.updates[0]
-        new = update["$set"]["source_breakdown.$[entry].ai_response.ticker_sentiments"]
+        new = update["$set"]["source_breakdown.$[entry].audited_response"]["ticker_sentiments"]
         assert any(t["ticker"] == "VNM" for t in new)
         assert db.log.inserted[0]["error_type"] == "Wrong ticker"
+
+    def test_correction_never_writes_ai_response(self):
+        """ai_response is the accuracy evaluation's only record of what the model
+        actually said. A correction that rewrites it makes every later evaluation
+        score the AI on human numbers."""
+        db = FakeDb()
+        run_action(db, AuditAction(
+            action_type="correct",
+            error_type=ErrorType.WRONG_MAGNITUDE,
+            corrected_ticker_sentiments=[{"ticker": "HPG", "score": -0.2}],
+        ))
+        _, update, _ = db.clusters.updates[0]
+        assert not any(
+            "ai_response" in path for path in update["$set"]
+        ), "no $set path may touch ai_response"
+
+    def test_audited_response_keeps_the_confidence_and_versions_of_the_run(self):
+        """It has to validate as an AIResponse on its own, and the confidence is
+        what core.aggregation weights the corrected source by."""
+        db = FakeDb()
+        run_action(db, AuditAction(
+            action_type="correct",
+            error_type=ErrorType.WRONG_MAGNITUDE,
+            corrected_ticker_sentiments=[{"ticker": "HPG", "score": -0.2}],
+        ))
+        _, update, _ = db.clusters.updates[0]
+        written = update["$set"]["source_breakdown.$[entry].audited_response"]
+        original = cluster_doc()["source_breakdown"][0]["ai_response"]
+        assert written["ai_confidence"] == original["ai_confidence"]
+        assert written["model_version"] == original["model_version"]
+        assert written["prompt_version"] == original["prompt_version"]
+
+    def test_second_correction_edits_the_first_admins_numbers(self):
+        """A re-edit stacks on the previous correction, so audit_log's old_* is
+        what was on screen — not the AI's value, which was already superseded."""
+        db = FakeDb(FakeClusters(cluster_doc(source_breakdown=[
+            {
+                **cluster_doc()["source_breakdown"][0],
+                "ai_response": ai_response([("HPG", -0.9)], []),
+                "audited_response": ai_response([("HPG", -0.5)], []),
+            }
+        ])))
+        run_action(db, AuditAction(
+            action_type="correct",
+            error_type=ErrorType.WRONG_MAGNITUDE,
+            corrected_ticker_sentiments=[{"ticker": "HPG", "score": -0.2}],
+        ))
+        logged = db.log.inserted[0]
+        assert logged["old_ticker_sentiments"] == [{"ticker": "HPG", "score": -0.5}]
+        assert logged["new_ticker_sentiments"] == [{"ticker": "HPG", "score": -0.2}]
 
     def test_error_type_is_required_for_a_correction(self):
         db = FakeDb()
@@ -351,6 +401,22 @@ class TestRowResilience:
         doc = cluster_doc()
         doc["source_breakdown"][0]["ai_response"]["ai_confidence"] = 0.0
         assert svc._row_from_flat(self._flat(doc)).ai_confidence == 0.0
+
+    def test_row_shows_the_correction_with_the_ai_original_beside_it(self):
+        """The correction form's reference column. Without this the panel shows
+        the previous admin's number as 'what the AI said' on every re-edit."""
+        doc = cluster_doc()
+        doc["source_breakdown"][0]["ai_response"] = ai_response([("HPG", -0.9)], [])
+        doc["source_breakdown"][0]["audited_response"] = ai_response([("HPG", -0.2)], [])
+        row = svc._row_from_flat(self._flat(doc))
+        assert [(t.ticker, t.score) for t in row.ticker_sentiments] == [("HPG", -0.2)]
+        assert [(t.ticker, t.score) for t in row.original_ticker_sentiments] == [("HPG", -0.9)]
+
+    def test_uncorrected_row_reports_the_ai_value_as_both(self):
+        doc = cluster_doc()
+        doc["source_breakdown"][0]["ai_response"] = ai_response([("HPG", -0.5)], [])
+        row = svc._row_from_flat(self._flat(doc))
+        assert row.ticker_sentiments == row.original_ticker_sentiments
 
     def test_null_title_survives_for_the_client_fallback(self):
         doc = cluster_doc()
