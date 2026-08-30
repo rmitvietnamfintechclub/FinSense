@@ -21,6 +21,8 @@ from backend.api.features.ticker.aggregator import (
 from backend.api.features.ticker.schemas import (
     GaugeBreakdown,
     TickerDetail,
+    TickerDirectory,
+    TickerDirectoryEntry,
     TickerEventItem,
     TickerEvents,
     TickerEventSourceBreakdown,
@@ -29,6 +31,7 @@ from backend.api.features.ticker.schemas import (
     TickerSentimentResponse,
 )
 from backend.core.config import APISettings, api_settings, pipeline_settings
+from backend.core.corrections import effective_response_raw
 from backend.core.formulas import bucket_sentiment
 from backend.core.lexicon import get_concept_weights
 from backend.core.ticker_metadata import get_ticker_dictionary
@@ -187,15 +190,16 @@ def _source_breakdown_for_event(event: dict, symbol: str, threshold: float) -> l
     sources are excluded entirely, not shown with a greyed-out score."""
     rows: list[TickerEventSourceBreakdown] = []
     for source in event.get("source_breakdown") or []:
-        ai_response = source.get("ai_response") or {}
-        confidence = ai_response.get("ai_confidence")
+        # An admin correction has to show up here, not only in the audit panel.
+        response = effective_response_raw(source) or {}
+        confidence = response.get("ai_confidence")
         if confidence is None or confidence < threshold:
             continue
 
         source_score = next(
             (
                 ts.get("score")
-                for ts in ai_response.get("ticker_sentiments") or []
+                for ts in response.get("ticker_sentiments") or []
                 if ts.get("ticker") == symbol
             ),
             None,
@@ -236,17 +240,22 @@ async def get_ticker_events(
     db: AsyncIOMotorDatabase,
     symbol: str,
     page: int,
+    window: str,
     settings: APISettings = api_settings,
 ) -> TickerEvents:
-    """No time-window filter here on purpose — this is 'recent events
-    mentioning the ticker,' paginated, not a live-scoring endpoint. Task 5b's
-    window (24h/48h/72h) scopes the S_final gauge; this list keeps paging
-    back through the ticker's full event history regardless of how quiet
-    the last 72h were."""
+    """Window-scoped, on the same updated_at boundary the detail endpoint and
+    the dashboard use — so the ticker detail page can pin its header, its score
+    and this list to one identical span of time. The page requests 72h on all
+    three; the endpoint stays general because nothing else about it is
+    page-specific."""
     page_size = settings.TICKER_EVENTS_PAGE_SIZE
     skip = (page - 1) * page_size
+    window_start = datetime.now(UTC) - timedelta(hours=settings.WINDOW_HOURS[window])
 
-    query = {"aggregated_analysis.ticker_sentiments.ticker": symbol}
+    query = {
+        "aggregated_analysis.ticker_sentiments.ticker": symbol,
+        "updated_at": {"$gte": window_start},
+    }
     cursor = (
         db[EVENT_CLUSTERS_COLLECTION]
         .find(query)
@@ -262,4 +271,29 @@ async def get_ticker_events(
     threshold = pipeline_settings.AI_CONFIDENCE_THRESHOLD
     items = [_build_event_item(e, symbol, threshold) for e in page_events]
 
-    return TickerEvents(ticker=symbol, page=page, has_more=has_more, items=items)
+    return TickerEvents(
+        ticker=symbol, window=window, page=page, has_more=has_more, items=items
+    )
+
+
+# ============================================================
+# GET /api/tickers
+# ============================================================
+
+
+def get_ticker_directory() -> TickerDirectory:
+    """No DB and no window — this is the frozen VN30 vocabulary plus the display
+    names, read straight from core/data/ticker_metadata.json. It exists because
+    the frontend cannot import backend files at runtime and every value on a
+    page has to come from the API."""
+    entries = get_ticker_dictionary()
+    return TickerDirectory(
+        tickers=[
+            TickerDirectoryEntry(
+                ticker=str(ticker),
+                company_name=entry.display_name,
+                aliases=list(entry.aliases),
+            )
+            for ticker, entry in sorted(entries.items(), key=lambda kv: str(kv[0]))
+        ]
+    )

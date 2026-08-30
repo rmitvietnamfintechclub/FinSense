@@ -86,6 +86,9 @@ class EventsResponse(BaseModel):
 class TickerItem(BaseModel):
     rank: int = Field(..., description="Thu hang toan cuc, tinh ca page truoc do (1-based)")
     ticker: str
+    company_name: str = Field(
+        ..., description="Display name tu core/data/ticker_metadata.json"
+    )
     event_count: int
     sentiment_score: float = Field(..., ge=-1.0, le=1.0)
     is_empty: bool = Field(
@@ -99,3 +102,49 @@ class TickersResponse(BaseModel):
     limit: int
     has_more: bool
     tickers: list[TickerItem]
+
+
+# ============================================================
+# GET /api/dashboard/events/{cluster_id}/articles
+# ============================================================
+
+
+class EventArticle(BaseModel):
+    """One SOURCE, not one article. A source that contributed 14 articles to an
+    event still has exactly one representative article with one extraction, so
+    this list is shorter than `total_articles` — see `articles_shown`."""
+
+    source: str
+    article_title: str = Field(
+        ..., description="Falls back to the event title for clusters written before titles were stored"
+    )
+    article_url: str
+    published_at: datetime
+    score: float | None = Field(
+        None,
+        ge=-1.0,
+        le=1.0,
+        description=(
+            "Mean of this source's ticker and concept scores — the per-source "
+            "counterpart of the event score the dashboard ranks on. Null when "
+            "the extraction produced no scores at all: render 'no data', never 0.00."
+        ),
+    )
+    ai_confidence: float = Field(..., ge=0.0, le=1.0)
+
+
+class EventArticles(BaseModel):
+    cluster_id: str
+    event_title: str
+    total_articles: int = Field(
+        ..., description="Every article ingested into this event, including those with no extraction of their own"
+    )
+    articles_shown: int = Field(
+        ...,
+        description=(
+            "len(articles). Lower than total_articles: only one representative "
+            "article per source carries an extraction, and sources below "
+            "AI_CONFIDENCE_THRESHOLD are excluded entirely."
+        ),
+    )
+    articles: list[EventArticle]

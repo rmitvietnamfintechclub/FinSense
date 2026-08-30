@@ -9,6 +9,9 @@ from backend.api.features.audit.router import router as audit_router
 from backend.api.features.auth.jwt_handler import verify_secret_configured
 from backend.api.features.auth.router import router as auth_router
 from backend.api.features.dashboard.router import router as dashboard_router
+from backend.api.features.ticker.router import (
+    directory_router as ticker_directory_router,
+)
 from backend.api.features.ticker.router import router as ticker_router
 from backend.core.config import api_settings, database_settings
 from backend.core.database_async import close_db, init_db
@@ -38,6 +41,7 @@ app.include_router(auth_router)
 app.include_router(audit_router)
 app.include_router(dashboard_router)
 app.include_router(ticker_router)
+app.include_router(ticker_directory_router)
 
 
 @app.get("/api/health")

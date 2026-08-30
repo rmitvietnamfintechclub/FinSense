@@ -77,7 +77,7 @@ cluster gets its full body scraped, so scraping after clustering avoids
 fetching bodies we will never send to the LLM. `content_fed_to_ai` is therefore
 `None` at clustering time and populated by the scraper stage.
 
-`docs/PIPELINE.md` documents every stage in detail — read it before changing
+`backend/PIPELINE.md` documents every stage in detail — read it before changing
 stage internals; this section only covers where files belong.
 
 ```

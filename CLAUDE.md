@@ -41,7 +41,7 @@ exclude `live` tests and warns about the unregistered `live` marker. Live tests 
 ## Architecture
 
 **Pipeline** (`backend/pipeline/`) — `rss → cluster → scraper → extract → aggregate`, orchestrated
-by `run_pipeline()` in `main.py`. **`docs/PIPELINE.md` documents all five stages in detail** — read it
+by `run_pipeline()` in `main.py`. **`backend/PIPELINE.md` documents all five stages in detail** — read it
 before changing stage internals. Stages hand off through MongoDB, never in memory; that's what
 makes the run idempotent and resumable. Clustering deliberately runs *before* scraping — only each
 cluster's centroid article gets its body fetched, so `content_fed_to_ai` is `None` until the

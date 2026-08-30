@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 from pymongo import UpdateOne
 
+from backend.core.corrections import effective_response_raw
 from backend.core.enums import Ticker
 from backend.core.formulas import confidence_weighted_avg
 from backend.pipeline.eod_batch.real_price import get_closing_price
@@ -47,11 +48,14 @@ def _collect_ticker_scores(
     for event in events:
         event_id = event.get("cluster_id") or str(event.get("_id"))
         for source in event.get("source_breakdown", []):
-            ai_response = source.get("ai_response", {})
-            confidence = ai_response.get("ai_confidence")
+            # An admin correction is the better number by definition, and
+            # re-running a past day is the documented repair path — so the
+            # rollup reads it, not the AI's original.
+            response = effective_response_raw(source) or {}
+            confidence = response.get("ai_confidence")
             if confidence is None or confidence < confidence_threshold:
                 continue
-            for ts in ai_response.get("ticker_sentiments", []):
+            for ts in response.get("ticker_sentiments", []):
                 if ts.get("ticker") != ticker or ts.get("score") is None:
                     continue
                 scores.append(ts["score"])

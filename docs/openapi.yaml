@@ -113,6 +113,33 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
+  /dashboard/events/{cluster_id}/articles:
+    get:
+      tags: [dashboard]
+      summary: The articles behind one event row
+      description: >
+        Backs the dashboard's expand-in-place event row. There is no event
+        detail page; this replaces it. Not window-scoped — the row was already
+        chosen by a windowed query, and re-filtering its own contents by time
+        would make an event expand into nothing.
+      parameters:
+        - name: cluster_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventArticles'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
   /dashboard/tickers:
     get:
       tags: [dashboard]
@@ -136,6 +163,27 @@ paths:
   # ─────────────────────────────────────────
   # TICKER DETAIL
   # ─────────────────────────────────────────
+
+  /tickers:
+    get:
+      tags: [ticker]
+      summary: The VN30 directory — symbols, company names, aliases
+      description: >
+        Static vocabulary, not market data: read from
+        core/data/ticker_metadata.json, never the database, and unaffected by
+        any window. Exists because the frontend cannot import backend files at
+        runtime and every value on a page must come from the API. Unpaginated —
+        the basket is exactly 30 rows, and the search box needs all of them
+        client-side to match as the user types.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TickerDirectory'
+        '500':
+          $ref: '#/components/responses/ServerError'
 
   /ticker/{symbol}:
     get:
@@ -238,12 +286,14 @@ paths:
       summary: Recent events mentioning this ticker
       description: >
         Returns a paginated list of events that mention the ticker, newest
-        first — the ticker's full event history, NOT scoped to the
-        24h/48h/72h window (that window only applies to the live S_final
-        gauge on GET /ticker/{symbol}). Page 2, 3, ... keeps going back as
-        far as event_clusters has data for this ticker.
+        first, scoped to the same 24h/48h/72h updated_at window as every other
+        windowed endpoint. The ticker detail page requests window=72h here, on
+        GET /ticker/{symbol} and on its header counts, so the whole page
+        describes one identical span of time; the chart's 7d/30d/90d selector
+        is separate and drives only /ticker/{symbol}/history.
       parameters:
         - $ref: '#/components/parameters/symbol'
+        - $ref: '#/components/parameters/window'
         - $ref: '#/components/parameters/page'
       responses:
         '200':
@@ -751,15 +801,104 @@ components:
           items:
             $ref: '#/components/schemas/TickerFeedItem'
 
+    EventArticles:
+      type: object
+      required: [cluster_id, event_title, total_articles, articles_shown, articles]
+      properties:
+        cluster_id:
+          type: string
+        event_title:
+          type: string
+        total_articles:
+          type: integer
+          description: >
+            Every article ingested into this event, including those with no
+            extraction of their own.
+        articles_shown:
+          type: integer
+          description: >
+            len(articles). Lower than total_articles by design: only one
+            representative article per source carries an extraction, and sources
+            below AI_CONFIDENCE_THRESHOLD are excluded entirely — the same rule
+            aggregated_analysis was blended under.
+        articles:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventArticle'
+
+    EventArticle:
+      type: object
+      description: >
+        One SOURCE, not one article. A source that contributed 14 articles to an
+        event still has exactly one representative article with one extraction.
+      required: [source, article_title, article_url, published_at, ai_confidence]
+      properties:
+        source:
+          type: string
+          example: CafeF
+        article_title:
+          type: string
+          description: Falls back to the event title for clusters written before titles were stored.
+        article_url:
+          type: string
+        published_at:
+          type: string
+          format: date-time
+        score:
+          $ref: '#/components/schemas/SentimentScore'
+          description: >
+            Mean of this source's ticker and concept scores — the per-source
+            counterpart of the event score the dashboard ranks on. Null when the
+            extraction produced no scores: render "no data", never 0.00.
+        ai_confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+
+    TickerDirectory:
+      type: object
+      required: [tickers]
+      properties:
+        tickers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TickerDirectoryEntry'
+
+    TickerDirectoryEntry:
+      type: object
+      required: [ticker, company_name, aliases]
+      properties:
+        ticker:
+          $ref: '#/components/schemas/Ticker'
+        company_name:
+          type: string
+          example: Hoa Phat Group
+        aliases:
+          type: array
+          description: >
+            Every name this company is known by, Vietnamese included. The search
+            box matches these as well as the symbol, so "Hoa Phat" finds HPG.
+          items:
+            type: string
+
     TickerFeedItem:
       type: object
-      required: [rank, ticker, event_count, sentiment_score, is_empty]
+      required:
+        [rank, ticker, company_name, event_count, sentiment_score, is_empty]
       properties:
         rank:
           type: integer
           description: Global 1-based rank, already offset by page.
         ticker:
           $ref: '#/components/schemas/Ticker'
+        company_name:
+          type: string
+          description: >
+            Display name from core/data/ticker_metadata.json. Served with the
+            row so a ranked list renders in one request; GET /tickers is the
+            full directory for the search box.
+          example: Hoa Phat Group
         event_count:
           type: integer
         sentiment_score:
@@ -898,6 +1037,9 @@ components:
       properties:
         ticker:
           $ref: '#/components/schemas/Ticker'
+        window:
+          type: string
+          enum: [24h, 48h, 72h]
         page:
           type: integer
         has_more:
@@ -1116,6 +1258,9 @@ components:
           type: string
         ticker_sentiments:
           type: array
+          description: >
+            Current values — the admin's where this row has been corrected,
+            otherwise the AI's. These pre-fill the editable boxes.
           items:
             type: object
             properties:
@@ -1124,6 +1269,29 @@ components:
               score:
                 $ref: '#/components/schemas/SentimentScore'
         concept_sentiments:
+          type: array
+          items:
+            type: object
+            properties:
+              concept:
+                $ref: '#/components/schemas/Concept'
+              score:
+                $ref: '#/components/schemas/SentimentScore'
+        original_ticker_sentiments:
+          type: array
+          description: >
+            Always the AI's own output, never overwritten — the unchangeable
+            reference rendered beside each editable box. Stays correct across
+            repeated corrections: a correction is stored in
+            source_breakdown[].audited_response and ai_response is immutable.
+          items:
+            type: object
+            properties:
+              ticker:
+                $ref: '#/components/schemas/Ticker'
+              score:
+                $ref: '#/components/schemas/SentimentScore'
+        original_concept_sentiments:
           type: array
           items:
             type: object

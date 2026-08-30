@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from backend.core.corrections import effective_response
 from backend.core.formulas import confidence_weighted_avg
 from backend.core.schemas.event_cluster import SourceBreakdown
 from backend.core.schemas.sentiment import (
@@ -28,10 +29,14 @@ def _collect_mentions(
     
     mentions: dict[str, tuple[list[float], list[float]]] = {}
     for sb in source_breakdown:
-        if sb.ai_response is None:
+        # Corrections must survive re-aggregation. Resolving the pair here, and
+        # not in the audit service, means a pipeline run over a corrected
+        # cluster reproduces the corrected blend rather than reverting it.
+        response = effective_response(sb)
+        if response is None:
             continue
-        confidence = sb.ai_response.ai_confidence
-        for item in getattr(sb.ai_response, items_attr):
+        confidence = response.ai_confidence
+        for item in getattr(response, items_attr):
             key = getattr(item, key_attr)
             scores, confidences = mentions.setdefault(key, ([], []))
             scores.append(item.score)

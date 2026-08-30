@@ -27,7 +27,12 @@ from fastapi.testclient import TestClient
 from backend.api.features.dashboard import service as dashboard_svc
 from backend.api.features.ticker import aggregator
 from backend.api.features.ticker import service as svc
-from backend.api.features.ticker.router import db_dep, router, valid_symbol
+from backend.api.features.ticker.router import (
+    db_dep,
+    directory_router,
+    router,
+    valid_symbol,
+)
 from backend.api.features.ticker.schemas import (
     GaugeBreakdown,
     TickerDetail,
@@ -38,6 +43,7 @@ from backend.api.features.ticker.schemas import (
     TickerHistoryRow,
 )
 from backend.core.config import api_settings, pipeline_settings
+from backend.core.enums import Ticker
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 OPENAPI_PATH = REPO_ROOT / "docs" / "openapi.yaml"
@@ -493,7 +499,7 @@ class TestGetTickerEvents:
             updated_at=now,
         )
         fake_db = {"event_clusters": FakeCollection([event])}
-        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         assert result.items[0].sentiment_score == 0.6
 
     def test_source_level_score_is_the_requested_tickers_entry(self):
@@ -507,7 +513,7 @@ class TestGetTickerEvents:
             updated_at=now,
         )
         fake_db = {"event_clusters": FakeCollection([event])}
-        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         breakdown = result.items[0].source_breakdown
         assert len(breakdown) == 1
         assert breakdown[0].source == "CafeF"
@@ -528,12 +534,12 @@ class TestGetTickerEvents:
         )
         fake_db = {"event_clusters": FakeCollection([event])}
 
-        hpg_result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        hpg_result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         assert hpg_result.items[0].sentiment_score == 0.5  # event level
         assert hpg_result.items[0].source_breakdown[0].score == 0.55  # source level
 
         fake_db_2 = {"event_clusters": FakeCollection([event])}
-        vnm_result = run(svc.get_ticker_events(fake_db_2, symbol="VNM", page=1))
+        vnm_result = run(svc.get_ticker_events(fake_db_2, symbol="VNM", page=1, window="72h"))
         assert vnm_result.items[0].sentiment_score == -0.3
         assert vnm_result.items[0].source_breakdown[0].score == -0.35
 
@@ -543,7 +549,7 @@ class TestGetTickerEvents:
         above = make_source("VnExpress", {"HPG": 0.3}, confidence=pipeline_settings.AI_CONFIDENCE_THRESHOLD + 0.05)
         event = make_event(source_breakdown=[below, above], updated_at=now)
         fake_db = {"event_clusters": FakeCollection([event])}
-        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         sources = [row.source for row in result.items[0].source_breakdown]
         assert sources == ["VnExpress"]
 
@@ -555,14 +561,14 @@ class TestGetTickerEvents:
         at_threshold = make_source("CafeF", {"HPG": 0.7}, confidence=pipeline_settings.AI_CONFIDENCE_THRESHOLD)
         event = make_event(source_breakdown=[at_threshold], updated_at=now)
         fake_db = {"event_clusters": FakeCollection([event])}
-        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         assert [row.source for row in result.items[0].source_breakdown] == ["CafeF"]
 
     def test_event_with_null_ticker_score_still_appears_in_the_list(self):
         now = datetime.now(UTC)
         event = make_event(ticker_sentiments=[{"ticker": "HPG", "score": None}], updated_at=now)
         fake_db = {"event_clusters": FakeCollection([event])}
-        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         assert len(result.items) == 1
         assert result.items[0].sentiment_score is None
 
@@ -571,14 +577,14 @@ class TestGetTickerEvents:
         source = make_source("CafeF", {"HPG": 0.4}, confidence=0.9)
         event = make_event(source_breakdown=[source], total_articles=12, updated_at=now)
         fake_db = {"event_clusters": FakeCollection([event])}
-        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         assert result.items[0].article_count == 12
         assert len(result.items[0].source_breakdown) == 1  # 12 articles, 1 source row — expected
 
     def test_newest_first_sort_is_requested_from_mongo(self):
         now = datetime.now(UTC)
         fake_db = {"event_clusters": FakeCollection([make_event(updated_at=now)])}
-        run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         cursor = fake_db["event_clusters"].last_cursor
         assert cursor.sort_calls == [("updated_at", -1)]
 
@@ -592,7 +598,7 @@ class TestGetTickerEvents:
             for i in range(4)
         ]
         fake_db = {"event_clusters": FakeCollection(newest_first)}
-        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         assert [item.cluster_id for item in result.items] == ["evt_0", "evt_1", "evt_2", "evt_3"]
 
     def test_pagination_boundary_exactly_one_page_reports_no_more(self):
@@ -602,7 +608,7 @@ class TestGetTickerEvents:
         page_size = api_settings.TICKER_EVENTS_PAGE_SIZE
         events = [make_event(cluster_id=f"evt_{i}", updated_at=now - timedelta(hours=i)) for i in range(page_size)]
         fake_db = {"event_clusters": FakeCollection(events)}
-        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         assert len(result.items) == page_size
         assert result.has_more is False
 
@@ -611,9 +617,9 @@ class TestGetTickerEvents:
         page_size = api_settings.TICKER_EVENTS_PAGE_SIZE
         events = [make_event(cluster_id=f"evt_{i}", updated_at=now - timedelta(hours=i)) for i in range(page_size + 1)]
         fake_db_1 = {"event_clusters": FakeCollection(events)}
-        page1 = run(svc.get_ticker_events(fake_db_1, symbol="HPG", page=1))
+        page1 = run(svc.get_ticker_events(fake_db_1, symbol="HPG", page=1, window="72h"))
         fake_db_2 = {"event_clusters": FakeCollection(events)}
-        page2 = run(svc.get_ticker_events(fake_db_2, symbol="HPG", page=2))
+        page2 = run(svc.get_ticker_events(fake_db_2, symbol="HPG", page=2, window="72h"))
         assert len(page1.items) == page_size
         assert page1.has_more is True
         assert len(page2.items) == 1
@@ -629,11 +635,11 @@ class TestGetTickerEvents:
         page_size = api_settings.TICKER_EVENTS_PAGE_SIZE
 
         fake_db_1 = {"event_clusters": FakeCollection(all_events)}
-        page1 = run(svc.get_ticker_events(fake_db_1, symbol="HPG", page=1))
+        page1 = run(svc.get_ticker_events(fake_db_1, symbol="HPG", page=1, window="72h"))
         fake_db_2 = {"event_clusters": FakeCollection(all_events)}
-        page2 = run(svc.get_ticker_events(fake_db_2, symbol="HPG", page=2))
+        page2 = run(svc.get_ticker_events(fake_db_2, symbol="HPG", page=2, window="72h"))
         fake_db_3 = {"event_clusters": FakeCollection(all_events)}
-        page3 = run(svc.get_ticker_events(fake_db_3, symbol="HPG", page=3))
+        page3 = run(svc.get_ticker_events(fake_db_3, symbol="HPG", page=3, window="72h"))
 
         ids_1 = [i.cluster_id for i in page1.items]
         ids_2 = [i.cluster_id for i in page2.items]
@@ -651,7 +657,7 @@ class TestGetTickerEvents:
 
     def test_no_events_returns_empty_array(self):
         fake_db = {"event_clusters": FakeCollection([])}
-        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         assert result.items == []
 
     def test_response_matches_ticker_events_schema_in_openapi(self):
@@ -704,16 +710,17 @@ class TestValidationErrors:
         resp = client.get("/api/ticker/HPG", params={"window": "99h"})
         assert resp.status_code == 422
 
-    def test_events_endpoint_has_no_window_param_extra_query_arg_is_ignored(self):
-        """Confirms the deliberate removal of window scoping from /events —
-        this is 'full event history, paginated', not window-scoped like the
-        gauge on GET /ticker/{symbol}. An unrecognized query string here
-        must not error (FastAPI ignores unknown query params by default)."""
+    def test_events_endpoint_rejects_a_window_outside_the_frozen_three(self):
+        """/events is window-scoped now, on the same 24h|48h|72h vocabulary as
+        every other windowed endpoint — so the ticker detail page can pin its
+        header, score and event list to one identical span."""
         now = datetime.now(UTC)
         client = make_client({"event_clusters": FakeCollection([make_event(updated_at=now)])})
-        resp = client.get("/api/ticker/HPG/events", params={"window": "1w"})
+        assert client.get("/api/ticker/HPG/events", params={"window": "1w"}).status_code == 422
+
+        resp = client.get("/api/ticker/HPG/events", params={"window": "72h"})
         assert resp.status_code == 200
-        assert "window" not in resp.json()
+        assert resp.json()["window"] == "72h"
 
     def test_invalid_days_is_422_not_silently_clamped(self):
         client = make_client({"daily_sentiment_history": FakeCollection([])})
@@ -778,7 +785,7 @@ class TestMalformedDocumentsDoNotCrash:
             updated_at=now,
         )
         fake_db = {"event_clusters": FakeCollection([event])}
-        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1))
+        result = run(svc.get_ticker_events(fake_db, symbol="HPG", page=1, window="72h"))
         assert result.items[0].source_breakdown == []  # excluded, not crashed
 
     def test_history_survives_row_missing_closing_price_key_entirely(self):
@@ -863,3 +870,38 @@ class TestOpenapiDocumentsTheValidationErrors:
         spec = yaml.safe_load(OPENAPI_PATH.read_text(encoding="utf-8"))
         for path in ("/ticker/{symbol}", "/ticker/{symbol}/history", "/ticker/{symbol}/events"):
             assert "security" not in spec["paths"][path]["get"], f"{path} should stay public"
+
+
+# ============================================================
+# GET /api/tickers — the VN30 directory behind the search box
+# ============================================================
+
+
+class TestTickerDirectory:
+    def _client(self) -> TestClient:
+        app = FastAPI()
+        app.include_router(directory_router)
+        return TestClient(app)
+
+    def test_returns_every_vn30_ticker(self):
+        """30 rows, from the frozen enum — a directory missing a ticker makes it
+        permanently unsearchable, with no error anywhere to show why."""
+        rows = self._client().get("/api/tickers").json()["tickers"]
+        assert {r["ticker"] for r in rows} == {t.value for t in Ticker}
+
+    def test_carries_the_aliases_the_search_box_matches_on(self):
+        """FE-01's acceptance criterion: 'HPG' and 'Hoa Phat' find the same
+        ticker. That only works if the Vietnamese names ship with the row."""
+        rows = self._client().get("/api/tickers").json()["tickers"]
+        hpg = next(r for r in rows if r["ticker"] == "HPG")
+        assert hpg["company_name"] == "Hoa Phat Group"
+        assert any("Hòa Phát" in alias for alias in hpg["aliases"])
+
+    def test_sorted_by_symbol_so_the_order_is_stable(self):
+        rows = self._client().get("/api/tickers").json()["tickers"]
+        assert [r["ticker"] for r in rows] == sorted(r["ticker"] for r in rows)
+
+    def test_never_touches_the_database(self):
+        """No db dependency is overridden here — if the route grew one, this
+        client would raise rather than quietly connecting to a real Mongo."""
+        assert self._client().get("/api/tickers").status_code == 200

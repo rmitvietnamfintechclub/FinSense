@@ -195,7 +195,7 @@ run resumable: if it dies partway, the next run picks up the unfinished clusters
 starting over. Clustering deliberately runs *before* scraping, so only each cluster's
 representative article gets its body fetched.
 
-**[`docs/PIPELINE.md`](../docs/PIPELINE.md) documents all five stages in detail** — algorithms,
+**[`PIPELINE.md`](PIPELINE.md) documents all five stages in detail** — algorithms,
 failure handling, and why each decision was made. Read it before changing anything inside a stage.
 
 **API** — four domains under `features/`: `auth` (JWT login), `audit` (the admin review panel),

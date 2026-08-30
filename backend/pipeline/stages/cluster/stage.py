@@ -124,11 +124,10 @@ def build_event_cluster(
         articles, embeddings, cluster, existing_representatives
     )
 
+    # Carried forward whole: a rewrite must not drop an admin's correction or
+    # re-open an audited source just because a new article joined the event.
     existing_extras = (
-        {
-            entry.source: (entry.ai_response, entry.is_audited)
-            for entry in existing.source_breakdown
-        }
+        {entry.source: entry for entry in existing.source_breakdown}
         if existing
         else {}
     )
@@ -136,8 +135,9 @@ def build_event_cluster(
         SourceBreakdown(
             source=source,
             representative_article=representative,
-            ai_response=existing_extras.get(source, (None, False))[0],
-            is_audited=existing_extras.get(source, (None, False))[1],
+            ai_response=getattr(existing_extras.get(source), "ai_response", None),
+            audited_response=getattr(existing_extras.get(source), "audited_response", None),
+            is_audited=getattr(existing_extras.get(source), "is_audited", False),
         )
         for source, representative in sorted(representatives.items())
     ]

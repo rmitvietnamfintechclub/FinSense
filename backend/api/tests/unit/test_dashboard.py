@@ -440,3 +440,124 @@ class TestGetTickers:
         assert [t.ticker for t in second.tickers] == ["HPG"]
         assert [t.rank for t in second.tickers] == [3]
         assert second.has_more is False
+
+
+class TestCompanyNameOnTheRankedList:
+    def test_row_carries_the_display_name_not_just_the_symbol(self, db):
+        """FE-02 renders symbol AND company name on every row and card. Serving
+        it here means the ranked list is one request, not one plus a join."""
+        seed(db, cluster("e1", tickers=[("HPG", -0.5)]))
+        result = run(svc.get_tickers(db, window="24h", page=1, limit=5))
+        assert result.tickers[0].company_name == "Hoa Phat Group"
+
+
+# ============================================================
+# get_event_articles — the dashboard's expand-in-place row
+# ============================================================
+
+
+def source_entry(
+    source: str,
+    *,
+    confidence: float = 0.9,
+    tickers: list[tuple[str, float]] | None = None,
+    concepts: list[tuple[str, float]] | None = None,
+    title: str | None = "A headline",
+    url: str = "http://example/1",
+    audited: list[tuple[str, float]] | None = None,
+) -> dict:
+    def response(ts):
+        return {
+            "ticker_sentiments": [{"ticker": t, "score": s} for t, s in ts],
+            "concept_sentiments": [{"concept": c, "score": s} for c, s in (concepts or [])],
+            "ai_confidence": confidence,
+            "model_version": "gemini-2.0-flash",
+            "prompt_version": "v3",
+        }
+
+    entry = {
+        "source": source,
+        "representative_article": {
+            "title": title,
+            "url": url,
+            "published_at": hours_ago(2),
+            "centroid_similarity": 0.95,
+        },
+        "ai_response": response([("HPG", -0.5)] if tickers is None else tickers),
+        "is_audited": audited is not None,
+    }
+    if audited is not None:
+        entry["audited_response"] = response(audited)
+    return entry
+
+
+def event_with_sources(*entries: dict, total_articles: int = 14) -> dict:
+    doc = cluster("evt1", title="HPG Q2 results")
+    doc["source_breakdown"] = list(entries)
+    doc["event_coverage"]["total_articles"] = total_articles
+    return doc
+
+
+class TestGetEventArticles:
+    def test_unknown_cluster_is_not_found_not_an_empty_list(self, db):
+        """An empty list would render as 'this event has no articles', which is
+        a different and wrong thing to tell the user."""
+        with pytest.raises(svc.EventNotFoundError):
+            run(svc.get_event_articles(db, cluster_id="nope"))
+
+    def test_one_row_per_source_with_title_url_and_score(self, db):
+        seed(db, event_with_sources(
+            source_entry("CafeF", tickers=[("HPG", -0.4)], concepts=[("MATERIALS", -0.6)]),
+            source_entry("VnExpress", tickers=[("HPG", 0.2)], url="http://example/2"),
+        ))
+        result = run(svc.get_event_articles(db, cluster_id="evt1"))
+
+        assert {a.source for a in result.articles} == {"CafeF", "VnExpress"}
+        cafef = next(a for a in result.articles if a.source == "CafeF")
+        assert cafef.article_url == "http://example/1"
+        assert cafef.score == pytest.approx(-0.5)  # mean of -0.4 and -0.6
+
+    def test_articles_shown_is_reported_separately_from_total_articles(self, db):
+        """The count on the collapsed row comes from event_coverage; the expanded
+        list has one row per SOURCE. FE has to be able to explain the gap."""
+        seed(db, event_with_sources(source_entry("CafeF"), total_articles=14))
+        result = run(svc.get_event_articles(db, cluster_id="evt1"))
+        assert result.total_articles == 14
+        assert result.articles_shown == 1
+
+    def test_sources_below_the_confidence_threshold_are_excluded(self, db):
+        """Same rule aggregated_analysis was blended under — showing a source the
+        score ignored would explain the number wrongly."""
+        seed(db, event_with_sources(
+            source_entry("CafeF", confidence=0.9),
+            source_entry("VnExpress", confidence=0.1),
+        ))
+        result = run(svc.get_event_articles(db, cluster_id="evt1"))
+        assert [a.source for a in result.articles] == ["CafeF"]
+
+    def test_source_with_no_extraction_is_skipped_not_crashed_on(self, db):
+        entry = source_entry("VnExpress")
+        del entry["ai_response"]
+        seed(db, event_with_sources(source_entry("CafeF"), entry))
+        result = run(svc.get_event_articles(db, cluster_id="evt1"))
+        assert [a.source for a in result.articles] == ["CafeF"]
+
+    def test_null_title_falls_back_to_the_event_title(self, db):
+        seed(db, event_with_sources(source_entry("CafeF", title=None)))
+        result = run(svc.get_event_articles(db, cluster_id="evt1"))
+        assert result.articles[0].article_title == "HPG Q2 results"
+
+    def test_score_is_null_when_the_extraction_found_nothing(self, db):
+        """Null, not 0.0 — the dashboard renders 'no data' differently from a
+        genuine neutral, and collapsing them is the bug this whole codebase
+        keeps guarding against."""
+        seed(db, event_with_sources(source_entry("CafeF", tickers=[], concepts=[])))
+        result = run(svc.get_event_articles(db, cluster_id="evt1"))
+        assert result.articles[0].score is None
+
+    def test_an_admin_correction_is_what_the_public_page_shows(self, db):
+        seed(db, event_with_sources(
+            source_entry("CafeF", tickers=[("HPG", -0.9)], audited=[("HPG", -0.1)]),
+        ))
+        result = run(svc.get_event_articles(db, cluster_id="evt1"))
+        assert result.articles[0].score == pytest.approx(-0.1)

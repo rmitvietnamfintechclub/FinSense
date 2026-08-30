@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from backend.api.features.dashboard.schemas import (
+    EventArticles,
     EventsResponse,
     GaugeResponse,
     SummaryResponse,
     TickersResponse,
 )
 from backend.api.features.dashboard.service import (
+    EventNotFoundError,
+    get_event_articles,
     get_events,
     get_gauge,
     get_summary,
@@ -80,3 +83,13 @@ async def read_tickers(
     ),
 ) -> TickersResponse:
     return await get_tickers(db, window=window, page=page, limit=limit)
+
+
+# FS-26 — the articles behind one event row, for the dashboard's
+# expand-in-place. There is no event detail page; this is what replaces it.
+@router.get("/events/{cluster_id}/articles", response_model=EventArticles)
+async def read_event_articles(cluster_id: str, db: DbDep) -> EventArticles:
+    try:
+        return await get_event_articles(db, cluster_id=cluster_id)
+    except EventNotFoundError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
