@@ -1,0 +1,66 @@
+name: Schedule Pipeline
+
+on:
+  schedule:
+    # Moi gio, dung phut 00. run_pipeline gate tren "co viec khong", khong phai
+    # "co bai moi khong", nen mot run chet giua chung (het quota Gemini,
+    # VnExpress 429) se duoc run gio sau nhat len va lam not — mien la cluster do
+    # con trong CLUSTER_LOOKBACK_DAYS. Chu ky mot gio la de backlog kip duoc don
+    # truoc khi het cua so do.
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+# Pipeline khong idempotent voi chinh no khi chay song song: hai run cung luc se
+# cung doc/ghi mot cluster_id va cai sau ghi de cai truoc. cancel-in-progress:
+# false — de run dang chay xong han, run moi xep hang; giet giua chung se de lai
+# cluster da ghi nhung chua extract.
+concurrency:
+  group: pipeline
+  cancel-in-progress: false
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    # Khong goi GitHub API, chi doc code cua chinh repo.
+    permissions:
+      contents: read
+    # Run da verify het 38s, nhung con cong cai dependency + tai model embedding
+    # lan dau (~1GB). 20 phut la tran an toan, khong phai ky vong.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # sentence-transformers tai model ve ~/.cache/huggingface. Khong cache thi
+      # moi run trong 24 run/ngay deu keo lai ~1GB tu Hugging Face — cham va du
+      # suc an rate limit cua ho.
+      # Key phai khop EMBEDDING_MODEL_NAME trong backend/core/config.py; doi model
+      # o do ma quen sua day thi chi ton mot lan tai lai, khong sai ket qua.
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-intfloat-multilingual-e5-base
+
+      # --frozen: cai dung theo uv.lock, khong resolve lai — mot ban release moi
+      # cua dependency khong the lam hong run tu dong ma repo khong doi gi.
+      # --no-dev: ruff/pytest/mongomock khong can cho production.
+      - name: Install dependencies
+        run: uv sync --frozen --no-dev
+
+      # --no-sync: buoc tren sync roi; khong co no thi `uv run` tu sync lai va keo
+      # nguoc dev group vao.
+      - name: Run pipeline
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          # Khong de mac dinh: doc file nay phai biet ngay no ghi vao DB nao.
+          MONGODB_DB_NAME: FinSense
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: uv run --no-sync python -m backend.pipeline.main

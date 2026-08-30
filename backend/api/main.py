@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.api.features.audit.router import router as audit_router
+from backend.api.features.auth.jwt_handler import verify_secret_configured
 from backend.api.features.auth.router import router as auth_router
 from backend.api.features.dashboard.router import router as dashboard_router
 from backend.api.features.ticker.router import router as ticker_router
@@ -15,6 +16,9 @@ from backend.core.database_async import close_db, init_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Before the DB, so a misconfigured deploy dies on boot rather than
+    # serving every endpoint happily and 500ing on the first login.
+    verify_secret_configured()
     await init_db(database_settings.MONGODB_URI, database_settings.MONGODB_DB_NAME)
     yield
     close_db()

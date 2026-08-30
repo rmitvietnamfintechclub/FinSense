@@ -300,9 +300,9 @@ One-off ops scripts. Run manually, not by CI.
 
 ```
 scripts/
-  init_db.py           Creates MongoDB collections, indexes, and seed data — run once on setup
-  reset_dev_db.py      Drops and recreates the dev database — never point this at production
-  seed_admins.py       Creates admin user accounts — reads credentials from env vars
+  init_db.py           Creates MongoDB collections and indexes — run once per database on setup
+  reset_dev_db.py      Wipes pipeline collections — refuses unless MONGODB_DB_NAME contains dev/test
+  seed_admins.py       Creates admin accounts — password read from stdin, never from a flag
   validate_lexicon.py  Validates lexicon JSON files for schema correctness — run after any lexicon edit
   run_evaluation.py    Triggers an evaluation run
 ```
@@ -313,22 +313,34 @@ scripts/
 
 ```
 .github/workflows/
-  ci.yml                  Orchestrator — triggers all checks on PR
-  ci-api.yml              Lints and tests backend/api/
-  ci-pipeline.yml         Lints and tests backend/pipeline/
-  ci-frontend.yml         Lints and type-checks frontend/
-  codegen-types.yml       Regenerates frontend/types/ when openapi.yaml changes
-  schedule-pipeline.yml   Cron trigger for the pipeline
-  schedule-eod.yml        Cron trigger for EOD batch aggregation
+  ci.yml                  Runs ruff on every PR to main
+  schedule-pipeline.yml   Hourly cron — the full ingestion pipeline
+  schedule-eod.yml        Nightly cron (00:30 ICT) — EOD batch aggregation
 ```
 
-This block is the intended shape. Most of these files are still 0 bytes — `STATE.md` lists which
-ones actually have content. Scheduled workflows run **only from the default branch**, so a cron
-added on a feature branch does nothing until it merges.
+That is the whole directory as of 2026-08-30. `ci-api.yml`, `ci-pipeline.yml`, `ci-frontend.yml`
+and `codegen-types.yml` were seeded in the first commit, stayed 0 bytes for the project's whole
+life, and were deleted — an empty file in `.github/workflows/` shows up as an *invalid workflow* in
+the Actions tab. The split they described is still a reasonable shape if you want it:
 
-All checks run on every PR to `main`. You cannot merge without passing CI. Do
-not bypass unless you are the project lead and the commit is structural/chore
-only.
+| Was going to be | What it would do |
+|---|---|
+| `ci-api.yml` | lint + test `backend/api/` |
+| `ci-pipeline.yml` | lint + test `backend/pipeline/` |
+| `ci-frontend.yml` | lint + typecheck `frontend/` |
+| `codegen-types.yml` | regenerate `frontend/types/` when `openapi.yaml` changes |
+
+For the backend, prefer **one test job added to `ci.yml`** over recreating the first two — the
+suite is a single pytest invocation and splitting it buys nothing. Note `ci.yml` currently pins
+Python 3.11 while `pyproject.toml` requires `>=3.13`; that passes only because ruff never executes
+the code, and a test job would fail on it immediately.
+
+Scheduled workflows run **only from the default branch**, so a cron added on a feature branch does
+nothing until it merges. Both schedules also need `MONGODB_URI` (and the pipeline needs
+`LLM_API_KEY`) as repository secrets, and Atlas's IP access list has to admit GitHub runners.
+
+CI must pass before merging to `main`. Do not bypass unless you are the project lead and the commit
+is structural/chore only.
 
 **Never use the GitHub web UI "Add files via upload".** It creates commits
 outside branch pointers and breaks the history. Push from git.

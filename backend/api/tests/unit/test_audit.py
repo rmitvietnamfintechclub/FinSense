@@ -385,6 +385,62 @@ class TestApproveIsNotACorrection:
         assert run_action(db, AuditAction(action_type="approve")).success is True
 
 
+class TestNullCorrectionScoreIsRejected:
+    """openapi's SentimentScore is nullable and the audit models reuse it, so a
+    null reaches the service — but ai_response scores are non-nullable, and
+    merging one in used to escape _rebuild_analysis as an uncaught
+    ValidationError, i.e. a 500 on a request the contract called legal."""
+
+    def test_null_ticker_score_is_a_domain_error_not_a_crash(self):
+        db = FakeDb()
+        with pytest.raises(svc.InvalidAuditActionError) as exc:
+            run_action(db, AuditAction(
+                action_type="correct",
+                error_type=ErrorType.WRONG_TICKER,
+                corrected_ticker_sentiments=[{"ticker": "HPG", "score": None}],
+            ))
+        # The message has to name the alternative: v1 has no removal mechanism,
+        # so the admin needs telling what to do instead.
+        assert "error_type" in str(exc.value)
+        assert db.log.inserted == []
+        assert db.clusters.updates == []
+
+    def test_null_concept_score_is_rejected_too(self):
+        db = FakeDb()
+        with pytest.raises(svc.InvalidAuditActionError):
+            run_action(db, AuditAction(
+                action_type="correct",
+                error_type=ErrorType.WRONG_MAGNITUDE,
+                corrected_concept_sentiments=[{"concept": "MATERIALS", "score": None}],
+            ))
+        assert db.clusters.updates == []
+
+    def test_one_null_rejects_the_whole_correction(self):
+        # Partial application would leave the admin unsure which half landed.
+        db = FakeDb()
+        with pytest.raises(svc.InvalidAuditActionError):
+            run_action(db, AuditAction(
+                action_type="correct",
+                error_type=ErrorType.WRONG_MAGNITUDE,
+                corrected_ticker_sentiments=[
+                    {"ticker": "HPG", "score": 0.9},
+                    {"ticker": "VIC", "score": None},
+                ],
+            ))
+        assert db.clusters.updates == []
+
+    def test_a_zero_score_is_not_treated_as_null(self):
+        # 0.0 is a legitimate neutral correction and must still go through.
+        db = FakeDb()
+        result = run_action(db, AuditAction(
+            action_type="correct",
+            error_type=ErrorType.WRONG_MAGNITUDE,
+            corrected_ticker_sentiments=[{"ticker": "HPG", "score": 0.0}],
+        ))
+        assert result.success is True
+        assert result.aggregated_analysis_recomputed is True
+
+
 # ============================================================
 # queue / summary pipeline shape
 # ============================================================

@@ -7,7 +7,7 @@ evidence a feature exists.
 Architecture lives in `CLAUDE.md`, the pipeline's internals in `docs/PIPELINE.md`. This file only
 tracks *what works right now*.
 
-**Last verified: 2026-08-25.** Re-verify before trusting anything below if the date is stale:
+**Last verified: 2026-08-30.** Re-verify before trusting anything below if the date is stale:
 
 ```shell
 uv run --extra dev python -m pytest -q                  # suite health
@@ -19,11 +19,12 @@ find . -path ./.venv -prune -o -name '*.py' -size -1c -print   # find the empty 
 
 | Component | Status |
 |---|---|
-| Pipeline `rss → cluster → scraper → extract → aggregate` | **Verified end to end on live data** |
+| Pipeline `rss → cluster → scraper → extract → aggregate` | **Verified end to end on live data.** Resumable since 2026-08-29 — `run_pipeline` gates on outstanding work, not on new articles. Fetches paced since 2026-08-30 |
 | EOD batch (`pipeline/eod_batch/`) + VNDirect price adapter | Reviewed and hardened 2026-08-25; suite green, **never run against real data** |
 | API — ticker + dashboard features | Implemented and runnable; **smoke-tested against live Atlas data 2026-08-28** |
-| API — auth | **Implemented.** `POST /api/auth/login` (JWT, bcrypt) + `audit/guard.py::require_admin`. No admin seeded yet — run `scripts/seed_admins.py` before first login |
+| API — auth | **Implemented.** `POST /api/auth/login` (JWT, bcrypt) + `audit/guard.py::require_admin`. The app refuses to boot without `JWT_SECRET_KEY` (2026-08-30). **No admin seeded yet** — run `scripts/seed_admins.py` before first login |
 | API — audit | **Implemented.** `/audit/summary`, `/audit/articles`, `PATCH /audit/events/{cluster_id}/{source}`, `/audit/log`. Read paths verified against live Atlas data; the PATCH write path is covered by unit tests only |
+| Docs | `README.md`, `backend/README.md`, `PIPELINE.md`, `FOLDER_STRUCTURE_GUIDANCE.md`, `mongodb_schema.md`, `CLAUDE.md` swept 2026-08-30. `frontend/README.md` and `docs/ARCHITECTURE.md` still missing |
 | API — contract parity | **14 documented endpoints, 14 implemented, zero drift** against `docs/openapi.yaml` |
 | Frontend (both apps, `ui/`, `types/`) | Every file 0 bytes — cannot be installed or run |
 | Evaluation harness | Only `cluster_threshold.py` works; runner/metrics empty, no ground truth |
@@ -47,10 +48,18 @@ below.
 
 ## Health
 
-- **Test suite: 15 failing, 361 passing, 10 skipped.** One cause, all in `test_dashboard.py`:
-  they monkeypatch `dashboard.service.get_database` and call the services synchronously. The module
-  is async + injected-`db` and has moved further since (pagination, `rank`, `sources` counts), so
-  the whole file needs rewriting, not patching. All four dashboard endpoints are untested.
+- **Test suite: 415 passing, 0 failing, 10 skipped — green as of 2026-08-30**, for the first time
+  in this repo's history. `test_dashboard.py` was rewritten that day: the old file predated the
+  sync->async migration, monkeypatched a `service.get_database` that no longer exists, and all 15
+  of its tests failed. All four dashboard endpoints now have coverage (23 tests).
+- `test_dashboard.py` and `test_main.py` drive async services with `asyncio.run()` from sync test
+  functions — there is no pytest-asyncio and none is needed. `test_dashboard.py` puts a small async
+  facade over mongomock rather than a hand-written fake, so `get_tickers`' real aggregation pipeline
+  is executed instead of re-asserted; its client is built `tz_aware=True` to match
+  `database_async.py`, without which mongomock returns naive datetimes and `age_in_hours` raises.
+- `test_main.py` was 0 bytes until 2026-08-29 and now holds 14 tests — the orchestrator's first
+  coverage. The query-semantics half runs against mongomock: the resume path only reads
+  (`find`/`$elemMatch`/`$size`/`$exists`), so none of the `bulk_write`/`array_filters` gaps apply.
 - **`ruff check backend/` is clean.** CI only runs ruff, so this is the gate that matters.
 - `test_eod_batch.py` and `test_price_adapter.py` are fully green (57 tests). The former no longer
   uses mongomock for `daily_sentiment_history` — see `FakeHistoryCollection`.
@@ -69,35 +78,55 @@ below.
   cluster stage bumps `updated_at` on every rewrite, so an old event that gains one article is
   weighted as brand new in the live gauge but stays on its original day in the chart. Accepted
   deliberately on 2026-08-28; revisit if the two views visibly contradict each other.
-- **A stopped run cannot be resumed.** `run_pipeline` returns early when RSS finds no new articles,
-  but RSS has already persisted the batch. If extraction dies partway, the next run stops
-  immediately and the half-finished clusters are never revisited — despite `run_extract` and
-  `run_scraper` both being written to resume. Recovery today is `scripts/reset_dev_db.py`, which
-  also discards scraped bodies and forces a re-scrape. **Deliberately left open** (2026-08-23); the
-  fix is to feed unfinished clusters back into the stage list rather than gating on new articles.
 - **VnExpress rate-limits the scraper.** 78 sequential requests with no delay or backoff earned 3
-  HTTP 429s on one run and 13 on the next, and it escalates with repeated runs. There is no
-  throttling, jitter, or retry anywhere in `stages/scraper/`.
+  HTTP 429s on one run and 13 on the next, and it escalates with repeated runs. Paced on
+  2026-08-30: `run_scraper` now waits `SCRAPER_DELAY_SECONDS` plus up to `SCRAPER_JITTER_SECONDS`
+  between fetches (1.0s + 0..0.5s), never before the first and never for a source it skips. Costs a
+  78-fetch run roughly 80-120s. **Still open:** there is no backoff on a 429 specifically, and no
+  failure marker — a body that can never be fetched is retried on every run until it ages out of
+  `CLUSTER_LOOKBACK_DAYS`, since "fetch failed" and "not fetched yet" are the same state in the
+  document. Pacing bounds the rate, not the total.
 - **The Gemini key hits a rate limit almost immediately.** One run got 19 extractions before 429s;
   the next got 0. Which limit (RPM / RPD / TPM) is unresolved — the 429 body is generic. Check the
   quota page at ai.google.dev before writing retry logic. `LLM_MAX_RETRIES` is `1`.
-- **The EOD cron is not live.** `schedule-eod.yml` has content only on the working branch; on `main`
-  the file is still 0 bytes. Scheduled workflows run **only from the default branch**, so nothing is
-  scheduled until that merges.
-- **No repository secrets exist.** `repos/.../actions/secrets` returns `total_count: 0`, so
-  `MONGODB_URI` is unset in Actions and the EOD job would die at `get_client()`. Atlas's IP access
-  list also has to admit GitHub runners (they have no fixed IPs) before a run can connect.
-- **Nothing populates `event_clusters` on a schedule.** `schedule-pipeline.yml` is 0 bytes. Once the
-  EOD cron is live it will roll up whatever a human last ran locally, writing 30 null rows on every
-  day nobody ran the pipeline by hand. Schedule the pipeline before trusting the history chart.
+  Measured 2026-08-29: a `v3` prompt is ~58,000 chars (~16,600 tokens), of which ~55,000 is
+  fixed reference payload — `SENTIMENT_v3.md` + `AI_CONFIDENCE_v3.md` + the lexicon — resent
+  on every article. Roughly triple `v2`. Relevant only if the binding limit turns out to be
+  TPM; deliberately not acted on (2026-08-29).
+- **Neither cron is live.** `schedule-pipeline.yml` (hourly, written 2026-08-29) and
+  `schedule-eod.yml` both have content only on the working branch; on `main` both files are still
+  0 bytes. Scheduled workflows run **only from the default branch**, so nothing is scheduled until
+  that merges. Merge order matters: the EOD rollup writes 30 null rows for every day the pipeline
+  did not run, so the pipeline cron must be live first.
+- **No repository secrets exist.** `repos/.../actions/secrets` returns `total_count: 0`
+  (re-verified 2026-08-29), so `MONGODB_URI` and `LLM_API_KEY` are unset in Actions and both jobs
+  would die at `get_client()` / `_get_model()`. Atlas's IP access list also has to admit GitHub
+  runners (they have no fixed IPs) before a run can connect.
+- **Resume re-attempts failed fetches every run.** `run_pipeline` gates on work rather than on new
+  articles (2026-08-29), and `load_unfinished_clusters` feeds the backlog back into
+  scrape/extract/aggregate — never through `run_cluster`, so `updated_at` does not move. Because
+  the scraper records no failure marker, a body it cannot fetch stays "unfinished" and is
+  re-attempted on **every** run until it ages out of `CLUSTER_LOOKBACK_DAYS` — up to ~72 times on
+  an hourly cron. Pacing (above) spaces those attempts out; only a per-source attempt counter would
+  stop them, and that persists a new field on `source_breakdown`.
+- **`uv sync` installs the CUDA torch stack.** `torch==2.13.0` pulls 43 `nvidia-*` packages, several
+  GB, on every cold cache. On an hourly cron that makes `schedule-pipeline.yml`'s 20-minute timeout
+  tighter than its "38s verified run" comment suggests, and the multi-GB uv cache entry can
+  LRU-evict the statically-keyed 1 GB Hugging Face entry from the repo's 10 GB Actions budget —
+  reinstating the model re-download the cache step exists to prevent. A CPU-only torch index would
+  fix both; it is a lockfile change, so it has not been made.
+- **The two crons can overlap.** `schedule-pipeline.yml` (17:00 UTC among others) and
+  `schedule-eod.yml` (17:30 UTC) use different concurrency groups, so an hourly run can still be
+  writing `ai_response`s to clusters created before 17:00 UTC — yesterday in ICT — while the EOD
+  batch rolls that same ICT day up. The history row then misses a late extraction.
 - **Bare `pytest` does not exclude `live` tests.** No `[tool.pytest.ini_options]` block, so the
   `live` marker is unregistered and quota-costing Gemini tests are only kept out by their `skipif`
   on a missing `LLM_API_KEY`.
 - **`ci.yml` lints on Python 3.11** while `pyproject.toml` requires `>=3.13`. It passes only because
   ruff doesn't execute the code.
-- **Dead lexicon data.** `pipeline/lexicon/vietnam_financial_lexicon.json` and
-  `concept_dictionary.json` are referenced by no Python code; only `relevance_keywords.json` is
-  loaded (by `stages/rss/filter.py`).
+- **Dead lexicon data.** `pipeline/lexicon/concept_dictionary.json` is referenced by no Python
+  code. `relevance_keywords.json` is loaded by `stages/rss/filter.py`, and
+  `vietnam_financial_lexicon.json` by `stages/extract/prompt_builder.py` since prompt `v2`.
 - **`test.py` at the repo root** is a scratch script that hits live RSS feeds on import.
 
 ## Open quality questions
@@ -141,9 +170,11 @@ Not bugs — unresolved calibration, flagged by the live runs.
 Seeded ahead of implementation, all 0 bytes:
 
 - `docs/adr/ADR-001`, `ADR-003`, `ADR-004`. (`ADR-002` is now written.)
-- 5 of 7 workflows — `ci-api.yml`, `ci-frontend.yml`, `ci-pipeline.yml`, `codegen-types.yml`,
-  `schedule-pipeline.yml` — plus `.github/dependabot.yml` and `.github/CODEOWNERS`. Only `ci.yml`
-  and `schedule-eod.yml` have content.
+- `.github/dependabot.yml` and `.github/CODEOWNERS`. The four empty workflow placeholders
+  (`ci-api.yml`, `ci-frontend.yml`, `ci-pipeline.yml`, `codegen-types.yml`) were deleted on
+  2026-08-29 — an empty file in `.github/workflows/` shows up as an invalid workflow in the Actions
+  tab. All three remaining workflows have content. `docs/FOLDER_STRUCTURE_GUIDANCE.md` still lists
+  the deleted four as intended; recreate them from there if the split CI is wanted.
 - Every `frontend/**/*.tsx`, every frontend `package.json`/`tsconfig.json`/`next.config.ts`,
   `frontend/types/generate.sh`, `frontend/types/generated/api.types.ts`.
 - `evaluation/runner.py`, `evaluation/metrics.py`. (`evaluation/README.md` and the whole
@@ -154,34 +185,43 @@ Seeded ahead of implementation, all 0 bytes:
 - `backend/api/tests/conftest.py`, `tests/integration/test_api_routes.py`,
   `tests/e2e/test_admin_login_flow.py` — still 0 bytes. `backend.*` imports resolve only because
   `uv sync` installs the project editable into `.venv`. Run API tests through `uv run`.
-- Prompts `v2.txt` and `v3.txt`. `PROMPT_VERSION` defaults to `v1`, the only one with content.
 
 ## Documentation drift
 
 Trust the tree over the docs.
 
-- `docs/mongodb_schema.md` documents a `concept_dictionary` collection that `scripts/init_db.py`
-  never creates, and a `needs_review` field on `aggregated_analysis` that no Pydantic schema has.
-  (Its `articles` block was corrected 2026-08-28 — it had listed `article_id`/`ingested_at`, which
-  no code writes, and omitted `title`/`summary`/`full_content`. `admin_users` was added the same day.)
-- `README.md` links to `backend/README.md` and `frontend/README.md`, neither of which exists.
+**Docs were swept on 2026-08-30** — `README.md`, `backend/README.md`, `docs/PIPELINE.md`,
+`docs/FOLDER_STRUCTURE_GUIDANCE.md`, `docs/mongodb_schema.md` and `CLAUDE.md` all reflect the tree
+as of that date. What is still knowingly out of step:
+
+- `docs/mongodb_schema.md`'s `concept_dictionary` collection and `aggregated_analysis.needs_review`
+  field are **documented but not implemented** — nothing creates or writes either. Both are now
+  labelled `NOT IMPLEMENTED` in place rather than deleted, so the intent survives; build them or
+  delete those sections before anyone codes against them. (Its `articles` block was corrected
+  2026-08-28 — it had listed `article_id`/`ingested_at`, which no code writes, and omitted
+  `title`/`summary`/`full_content`. `admin_users` was added the same day.)
+- `README.md` links to `frontend/README.md` and `docs/ARCHITECTURE.md`; neither exists. Both are
+  flagged as TODO at the link site.
+- `docs/FOLDER_STRUCTURE_GUIDANCE.md` still describes the frontend and evaluation trees as intended
+  shapes. Both are almost entirely 0-byte scaffolding — see the inventory above.
+- `docs/RUBRICS/SENTIMENT.md` and `AI_CONFIDENCE.md` are the unversioned originals. The files the
+  prompt actually loads are the versioned copies under
+  `backend/pipeline/stages/extract/prompts/docs/`, pinned by filename to `PROMPT_VERSION`. Editing
+  the `docs/RUBRICS/` copies changes nothing at runtime.
 
 ## Next up
 
 Ordered by what unblocks the most:
 
-1. Throttle the scraper — you lose real articles every run and it worsens with each one.
-2. Resolve which Gemini limit you're hitting, from the quota dashboard. That decides whether the
+1. Resolve which Gemini limit you're hitting, from the quota dashboard. That decides whether the
    answer is retries/backoff or a paid tier.
-3. Seed an admin (`scripts/init_db.py` then `scripts/seed_admins.py`) and exercise the audit
+2. Seed an admin (`scripts/init_db.py` then `scripts/seed_admins.py`) and exercise the audit
    `PATCH` end to end — it is the one write path never run against real Mongo.
-4. Build `frontend/admin-panel` (login + audit queue). Regenerate
+3. Build `frontend/admin-panel` (login + audit queue). Regenerate
    `frontend/types/generated/api.types.ts` first — `docs/openapi.yaml` changed substantially on
-   2026-08-28 and the generated types are stale.
-4. Give `schedule-pipeline.yml` content. The EOD rollup is scheduled ahead of the thing it rolls up.
-5. Close the resume gap in `run_pipeline` so a stopped run can be continued without a reset.
-6. Rewrite `test_dashboard.py` against the async + DI services, then add a test job to CI so it can't rot again.
-7. Batch the EOD price fetch — 30 sequential requests per night where VNDirect's `q` accepts a
+   2026-08-28 and again on 2026-08-30 (`CorrectedScore`), so the generated types are stale.
+4. Add a test job to CI — the suite is green, and only ruff gates a merge.
+5. Batch the EOD price fetch — 30 sequential requests per night where VNDirect's `q` accepts a
    comma-separated code list. Also worth a projection on the day's `find()` and a single pass in
    `_collect_ticker_scores` instead of one per ticker.
-8. Populate the ADRs — the decisions are named but never justified in-repo.
+6. Populate the ADRs — the decisions are named but never justified in-repo.

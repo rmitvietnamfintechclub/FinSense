@@ -268,6 +268,29 @@ def _merge_scores(
     return list(merged.values())
 
 
+def _reject_null_scores(corrections: list | None, key: str) -> None:
+    """A null correction score has no meaning in v1.
+
+    openapi's SentimentScore is nullable because a null is legitimate elsewhere
+    (an aggregated score with no qualifying source, a history row with no data),
+    and the audit models reuse it. But ai_response.ticker_sentiments[].score is
+    non-nullable, so merging a null in makes the document fail validation on the
+    way back out — previously as an uncaught ValidationError from
+    _rebuild_analysis, i.e. a 500 on a request the contract said was legal.
+
+    Refused here with the alternative spelled out, because v1 deliberately has no
+    removal mechanism: a hallucinated ticker is recorded via error_type, and its
+    score stays in the extraction.
+    """
+    for item in corrections or []:
+        if item.score is None:
+            raise InvalidAuditActionError(
+                f"corrected {key} {str(getattr(item, key))!r} has a null score. "
+                "v1 has no removal mechanism — to flag an entry the AI should not "
+                "have produced, use error_type 'Wrong ticker' and leave its score."
+            )
+
+
 def _find_source(cluster: dict, source: str) -> dict:
     for sb in cluster.get("source_breakdown") or []:
         if sb.get("source") == source:
@@ -295,6 +318,8 @@ async def apply_audit_action(
         raise InvalidAuditActionError(
             "approve must not carry error_type or corrected scores — use action_type 'correct'"
         )
+    _reject_null_scores(action.corrected_ticker_sentiments, "ticker")
+    _reject_null_scores(action.corrected_concept_sentiments, "concept")
 
     collection = db[EVENT_CLUSTERS_COLLECTION]
     cluster = await collection.find_one({"cluster_id": cluster_id})

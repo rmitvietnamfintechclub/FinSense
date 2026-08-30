@@ -70,7 +70,7 @@ Core collection. One document per event. Written by pipeline, read by serving AP
     "concept_sentiments": [
       { "concept": "string — canonical enum e.g. 'STEEL'", "score": "float [-1.0, 1.0] | null — same null semantics as ticker_sentiments" }
     ],
-    "needs_review": "boolean — true when no source in the cluster meets AI_CONFIDENCE_THRESHOLD; surfaces the event for human review"
+    "needs_review": "NOT IMPLEMENTED — planned: true when no source in the cluster meets AI_CONFIDENCE_THRESHOLD, to surface the event for human review. No Pydantic schema declares it and nothing writes it; the audit queue currently selects on source_breakdown[].is_audited instead."
   },
 
   "source_breakdown": [
@@ -146,7 +146,16 @@ Sector/concept weight map. Manually seeded. Read by serving API for S_final calc
 }
 ```
 
-## 5. `concept_dictionary`
+## 5. `concept_dictionary` — NOT IMPLEMENTED
+
+Planned, never built. `scripts/init_db.py` does not create this collection and no code reads it.
+Concept aliases live in `backend/pipeline/lexicon/concept_dictionary.json`, which is itself
+currently unreferenced by any Python module. Ticker aliases — which *are* used — live in
+`backend/core/data/ticker_metadata.json`, loaded by `core/ticker_metadata.py`.
+
+Kept here as a record of intent. Build it, or delete this section, before anyone writes code
+against it.
+
 ```json
 {
   "concept": "REAL_ESTATE",
@@ -154,7 +163,7 @@ Sector/concept weight map. Manually seeded. Read by serving API for S_final calc
 }
 ```
 
-**Indexes:**
+**Indexes (planned):**
 - `aliases` → multikey index (alias lookup at serving time)
 
 ---
