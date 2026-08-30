@@ -27,3 +27,10 @@ Thumbs.db
 *.key
 
 /test.py
+/claudekit/
+/content/
+/Rhistory/
+
+# Claude Code personal overrides (project settings.json IS committed)
+.claude/settings.local.json
+.claude

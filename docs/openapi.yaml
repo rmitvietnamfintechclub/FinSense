@@ -23,63 +23,140 @@ tags:
     description: Admin audit panel endpoints (JWT required)
   - name: auth
     description: Authentication
+  - name: internal
+    description: Liveness/health endpoints
 
 paths:
+
+  /health:
+    get:
+      tags: [internal]
+      summary: Liveness probe
+      description: >
+        Defined directly in backend/api/main.py rather than a feature router —
+        it touches no database and exists so a platform health check can hit the
+        process without a DB round trip.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
 
   # ─────────────────────────────────────────
   # DASHBOARD
   # ─────────────────────────────────────────
 
-  /dashboard/overview:
+  /dashboard/summary:
     get:
       tags: [dashboard]
-      summary: Dashboard metric cards + Fear & Greed gauge
+      summary: Dashboard metric cards
       description: >
-        Returns article count, event count, last updated timestamp,
-        and gauge data for the selected time window.
-        Tickers tracked is a frontend constant — not returned here.
-      parameters:
-        - $ref: '#/components/parameters/window'
+        Global counts and the system-wide last-updated timestamp.
+        Deliberately window-independent — these are totals, not window slices,
+        so the cards do not flicker when the user changes the gauge window.
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DashboardOverview'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                $ref: '#/components/schemas/DashboardSummary'
         '500':
           $ref: '#/components/responses/ServerError'
 
-  /dashboard/feed:
+  /dashboard/gauge:
     get:
       tags: [dashboard]
-      summary: Top tickers or top events feed
-      description: >
-        Returns top 5 items per page.
-        sort=ticker → ranked by event volume, includes S_final score.
-        sort=event → ranked by article volume, no sentiment score.
-        Use page param for load more.
+      summary: Fear & Greed gauge for the selected window
       parameters:
         - $ref: '#/components/parameters/window'
-        - name: sort
-          in: query
-          required: true
-          schema:
-            type: string
-            enum: [ticker, event]
-          description: Feed mode — top tickers by event volume or top events by article volume
-        - $ref: '#/components/parameters/page'
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/DashboardFeed'
-        '400':
-          $ref: '#/components/responses/BadRequest'
+                $ref: '#/components/schemas/DashboardGauge'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /dashboard/events:
+    get:
+      tags: [dashboard]
+      summary: Top events in the window, ranked by article volume
+      description: >
+        Kept separate from /dashboard/tickers rather than merged behind a sort
+        param: the two payloads share no fields and are rendered by unrelated
+        widgets, so a polymorphic union would only force a discriminated type on
+        every consumer for no gain.
+      parameters:
+        - $ref: '#/components/parameters/window'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardEvents'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /dashboard/events/{cluster_id}/articles:
+    get:
+      tags: [dashboard]
+      summary: The articles behind one event row
+      description: >
+        Backs the dashboard's expand-in-place event row. There is no event
+        detail page; this replaces it. Not window-scoped — the row was already
+        chosen by a windowed query, and re-filtering its own contents by time
+        would make an event expand into nothing.
+      parameters:
+        - name: cluster_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventArticles'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /dashboard/tickers:
+    get:
+      tags: [dashboard]
+      summary: Top tickers in the window, ranked by event volume
+      parameters:
+        - $ref: '#/components/parameters/window'
+        - $ref: '#/components/parameters/page'
+        - $ref: '#/components/parameters/limit'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardTickers'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -87,13 +164,37 @@ paths:
   # TICKER DETAIL
   # ─────────────────────────────────────────
 
+  /tickers:
+    get:
+      tags: [ticker]
+      summary: The VN30 directory — symbols, company names, aliases
+      description: >
+        Static vocabulary, not market data: read from
+        core/data/ticker_metadata.json, never the database, and unaffected by
+        any window. Exists because the frontend cannot import backend files at
+        runtime and every value on a page must come from the API. Unpaginated —
+        the basket is exactly 30 rows, and the search box needs all of them
+        client-side to match as the user types.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TickerDirectory'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
   /ticker/{symbol}:
     get:
       tags: [ticker]
       summary: Ticker identity card + live sentiment gauge
       description: >
-        Returns company info and live S_final score for the selected window.
-        Score is computed at request time from event_clusters — not from daily_sentiment_history.
+        Company info and live S_final for the selected window, computed at
+        request time from event_clusters — not from daily_sentiment_history.
+        An unknown symbol is a 404, never a 200 with a zero score, so the
+        client can tell it apart from a genuinely quiet ticker. Lowercase
+        input is accepted and upper-cased server-side.
       parameters:
         - $ref: '#/components/parameters/symbol'
         - $ref: '#/components/parameters/window'
@@ -106,8 +207,44 @@ paths:
                 $ref: '#/components/schemas/TickerDetail'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/ServerError'
+
+  # Path param is {ticker} on this one route only, by request; the FS-37 routes
+  # use {symbol}. Worth unifying next time this file is touched.
+  /ticker/{ticker}/sentiment:
+    get:
+      tags: [ticker]
+      summary: Live S_final for one ticker
+      description: >
+        Score is computed at request time from event_clusters — not from
+        daily_sentiment_history. An unknown symbol is a 404, never a 200 with a
+        zero score, so the client can tell it apart from a genuinely quiet ticker.
+        Lowercase input is accepted and upper-cased server-side.
+      parameters:
+        - name: ticker
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Ticker'
+          example: HPG
+        - $ref: '#/components/parameters/window'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TickerSentiment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
 
   /ticker/{symbol}/history:
     get:
@@ -134,6 +271,12 @@ paths:
                 $ref: '#/components/schemas/TickerHistory'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: Invalid days value (must be one of 7/30/90)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -142,8 +285,12 @@ paths:
       tags: [ticker]
       summary: Recent events mentioning this ticker
       description: >
-        Returns paginated list of events that mention the ticker
-        within the selected time window.
+        Returns a paginated list of events that mention the ticker, newest
+        first, scoped to the same 24h/48h/72h updated_at window as every other
+        windowed endpoint. The ticker detail page requests window=72h here, on
+        GET /ticker/{symbol} and on its header counts, so the whole page
+        describes one identical span of time; the chart's 7d/30d/90d selector
+        is separate and drives only /ticker/{symbol}/history.
       parameters:
         - $ref: '#/components/parameters/symbol'
         - $ref: '#/components/parameters/window'
@@ -157,6 +304,12 @@ paths:
                 $ref: '#/components/schemas/TickerEvents'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          description: page < 1
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -200,13 +353,45 @@ paths:
   # AUDIT
   # ─────────────────────────────────────────
 
-  /audit/events:
+  /audit/summary:
     get:
       tags: [audit]
-      summary: Audit event queue — unaudited first
+      summary: Audit metric cards
+      description: >
+        The three counters at the top of the audit panel.
+        pending_review is total_articles - audited_articles by definition, so it
+        includes ingested articles that were never centroid-selected and therefore
+        have no ai_response to audit. That is intentional per product decision.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditSummary'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /audit/articles:
+    get:
+      tags: [audit]
+      summary: Audit queue — one row per (cluster_id, source)
+      description: >
+        The audit table. Deliberately FLAT: one row per source entry within a
+        cluster, not one row per cluster, because a source is the unit an admin
+        approves or corrects. A cluster with three sources yields three rows.
+        Only sources that have an ai_response appear — a source with no extraction
+        yet cannot be judged.
       security:
         - bearerAuth: []
       parameters:
+        - $ref: '#/components/parameters/audit_status'
+        - $ref: '#/components/parameters/audit_sort'
+        - $ref: '#/components/parameters/audit_search'
         - $ref: '#/components/parameters/page'
       responses:
         '200':
@@ -214,9 +399,11 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AuditQueue'
+                $ref: '#/components/schemas/AuditArticles'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -226,9 +413,17 @@ paths:
       summary: Approve or correct a source entry within an event
       description: >
         Approves or corrects the AI extraction for one source within a cluster.
-        On correct — updates scores directly on event_clusters source_breakdown,
-        flips is_audited to true, writes immutable record to audit_log.
-        On approve — flips is_audited to true, writes to audit_log with no score changes.
+        On correct — merges the supplied scores into that source's ai_response,
+        flips is_audited to true, RECOMPUTES the cluster's aggregated_analysis so
+        the correction reaches the dashboard and ticker pages, and appends an
+        immutable audit_log record.
+        On approve — flips is_audited to true and appends an audit_log record with
+        no score changes.
+        Re-auditing an already-audited source is allowed and appends a further
+        audit_log entry; audit_log is append-only and never rewritten (US-G4).
+        admin_id and admin_name are taken from the JWT, never from the request body.
+        v1 has no removal mechanism: a hallucinated ticker is recorded via
+        error_type 'Wrong ticker' but its score remains in the extraction.
       security:
         - bearerAuth: []
       parameters:
@@ -238,7 +433,10 @@ paths:
           required: true
           schema:
             type: string
-            enum: [CafeF, Vietstock]
+            enum: [CafeF, VnExpress]
+          description: >
+            Matches backend.core.config.pipeline_settings.RSS_FEEDS — update this
+            enum if a source is added or removed there.
       requestBody:
         required: true
         content:
@@ -251,16 +449,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  success:
-                    type: boolean
-                  cluster_id:
-                    type: string
-                  source:
-                    type: string
-                  action_type:
-                    type: string
+                $ref: '#/components/schemas/AuditActionResult'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -269,6 +458,8 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/ServerError'
 
@@ -276,6 +467,9 @@ paths:
     get:
       tags: [audit]
       summary: Immutable audit history log
+      description: >
+        Newest first. No UI page consumes this yet, but audit_log is written by
+        every PATCH and US-G5/US-G6 depend on reading it back.
       security:
         - bearerAuth: []
       parameters:
@@ -291,6 +485,7 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '500':
           $ref: '#/components/responses/ServerError'
+
 
 # ─────────────────────────────────────────
 # COMPONENTS
@@ -325,13 +520,24 @@ components:
         default: 1
       description: Page number for paginated results (5 items per page)
 
+    limit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 50
+        default: 5
+      description: Page size. Defaults come from APISettings.DEFAULT_*_LIMIT.
+
     symbol:
       name: symbol
       in: path
       required: true
       schema:
-        type: string
-        example: HPG
+        $ref: '#/components/schemas/Ticker'
+      example: HPG
       description: Ticker symbol (uppercase)
 
     cluster_id:
@@ -341,6 +547,40 @@ components:
       schema:
         type: string
         example: evt_hpg_q2_2026
+
+    audit_status:
+      name: status
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [pending, audited, all]
+        default: pending
+      description: Segmented filter in the audit toolbar.
+
+    audit_sort:
+      name: sort
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [newest, oldest, confidence_desc, confidence_asc]
+        default: newest
+      description: >
+        newest/oldest order by the article's published_at; confidence_* order by
+        the source's ai_confidence. Every ordering breaks ties on
+        (cluster_id, source) so pagination is a total order and rows are neither
+        dropped nor repeated across pages.
+
+    audit_search:
+      name: search
+      in: query
+      required: false
+      schema:
+        type: string
+      description: >
+        Case-insensitive match against the article title or a ticker symbol
+        present in that source's extraction. Empty/absent means no filtering.
 
   responses:
     BadRequest:
@@ -356,7 +596,7 @@ components:
           schema:
             $ref: '#/components/schemas/Error'
     Forbidden:
-      description: Action not permitted (e.g. attempt to write to frozen_test_set)
+      description: Action not permitted for this account
       content:
         application/json:
           schema:
@@ -373,6 +613,20 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: >
+        Query or path parameter failed validation. FastAPI's native shape —
+        a `detail` array, not the `Error` object — so clients must not assume
+        `Error` here.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              detail:
+                type: array
+                items:
+                  type: object
 
   schemas:
 
@@ -392,100 +646,334 @@ components:
       nullable: true
       description: Continuous sentiment score. null means no valid events in window.
 
+    CorrectedScore:
+      type: number
+      format: float
+      minimum: -1.0
+      maximum: 1.0
+      description: >
+        A score supplied by an admin correction. Non-nullable, unlike
+        SentimentScore: v1 has no removal mechanism, so a correction always
+        carries a real score. A null is rejected with 400 — flag an entry the AI
+        should not have produced with error_type 'Wrong ticker' and leave its
+        score in place.
+
+    # Frozen vocabularies — kept in sync by hand with backend/core/enums.py.
+    # These are closed sets on purpose: historical sentiment records are labeled
+    # against this exact vocabulary. Do not add/remove values here without a
+    # corresponding backend enum change.
+
+    Ticker:
+      type: string
+      description: VN30 ticker symbol. Mirrors backend/core/enums.py::Ticker.
+      enum:
+        - ACB
+        - BID
+        - BSR
+        - CTG
+        - FPT
+        - GAS
+        - GVR
+        - HDB
+        - HPG
+        - LPB
+        - MBB
+        - MCH
+        - MSN
+        - MWG
+        - SAB
+        - SHB
+        - SSB
+        - SSI
+        - STB
+        - TCB
+        - TCX
+        - VCB
+        - VHM
+        - VIB
+        - VIC
+        - VJC
+        - VNM
+        - VPB
+        - VPL
+        - VRE
+
+    Concept:
+      type: string
+      description: Macro/sector concept taxonomy. Mirrors backend/core/enums.py::Concept.
+      enum:
+        - BANKING
+        - CONSUMER_DISCRETIONARY
+        - CONSUMER_STAPLES
+        - ENERGY
+        - INDUSTRIALS
+        - MACRO
+        - MATERIALS
+        - REAL_ESTATE
+        - SECURITIES
+        - TECHNOLOGY
+
     # ── Dashboard ──
 
-    DashboardOverview:
+    DashboardSummary:
       type: object
+      required: [total_tickers, total_articles, total_events, last_updated]
+      properties:
+        total_tickers:
+          type: integer
+          description: len(backend/core/enums.py::Ticker). Not read from the DB.
+        total_articles:
+          type: integer
+        total_events:
+          type: integer
+        last_updated:
+          type: string
+          format: date-time
+          nullable: true
+          description: Newest event_clusters.updated_at. null when the DB is empty.
+
+    DashboardGauge:
+      type: object
+      required:
+        [window, market_score, is_empty, positive_count, neutral_count,
+         negative_count, scored_events, total_events_in_window]
       properties:
         window:
           type: string
           example: 24h
-        last_updated:
-          type: string
-          format: date-time
-        articles_count:
+        market_score:
+          type: number
+          format: float
+          minimum: -1.0
+          maximum: 1.0
+          description: >
+            0.0 when is_empty is true. Read is_empty before rendering — a 0.0
+            empty state and a genuinely neutral 0.0 must not look alike.
+        is_empty:
+          type: boolean
+          description: true if no scoreable event in the window.
+        positive_count:
           type: integer
-        events_count:
+        neutral_count:
           type: integer
-        gauge:
-          type: object
-          properties:
-            score:
-              $ref: '#/components/schemas/SentimentScore'
-            positive_count:
-              type: integer
-            neutral_count:
-              type: integer
-            negative_count:
-              type: integer
+        negative_count:
+          type: integer
+        scored_events:
+          type: integer
+          description: Events folded into market_score. Equals the three bucket counts summed.
+        total_events_in_window:
+          type: integer
+          description: >
+            All events in the window, including ones with no score yet. Use this
+            for "N events" copy — the bucket counts undercount it.
 
-    DashboardFeed:
+    DashboardEvents:
       type: object
+      required: [window, page, limit, has_more, events]
       properties:
-        sort:
-          type: string
-          enum: [ticker, event]
         window:
           type: string
         page:
           type: integer
+        limit:
+          type: integer
         has_more:
           type: boolean
-        items:
+        events:
           type: array
           items:
-            oneOf:
-              - $ref: '#/components/schemas/TickerFeedItem'
-              - $ref: '#/components/schemas/EventFeedItem'
+            $ref: '#/components/schemas/EventFeedItem'
 
-    TickerFeedItem:
+    DashboardTickers:
       type: object
+      required: [window, page, limit, has_more, tickers]
       properties:
-        rank:
-          type: integer
-        ticker:
+        window:
           type: string
-          example: HPG
-        company_name:
-          type: string
-          example: Hoa Phat Group
-        event_count:
+        page:
           type: integer
-        sentiment_score:
-          $ref: '#/components/schemas/SentimentScore'
+        limit:
+          type: integer
+        has_more:
+          type: boolean
+        tickers:
+          type: array
+          items:
+            $ref: '#/components/schemas/TickerFeedItem'
 
-    EventFeedItem:
+    EventArticles:
       type: object
+      required: [cluster_id, event_title, total_articles, articles_shown, articles]
       properties:
-        rank:
-          type: integer
         cluster_id:
           type: string
         event_title:
           type: string
-        article_count:
+        total_articles:
           type: integer
-        sources:
-          type: object
-          properties:
-            CafeF:
-              type: integer
-            Vietstock:
-              type: integer
+          description: >
+            Every article ingested into this event, including those with no
+            extraction of their own.
+        articles_shown:
+          type: integer
+          description: >
+            len(articles). Lower than total_articles by design: only one
+            representative article per source carries an extraction, and sources
+            below AI_CONFIDENCE_THRESHOLD are excluded entirely — the same rule
+            aggregated_analysis was blended under.
+        articles:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventArticle'
+
+    EventArticle:
+      type: object
+      description: >
+        One SOURCE, not one article. A source that contributed 14 articles to an
+        event still has exactly one representative article with one extraction.
+      required: [source, article_title, article_url, published_at, ai_confidence]
+      properties:
+        source:
+          type: string
+          example: CafeF
+        article_title:
+          type: string
+          description: Falls back to the event title for clusters written before titles were stored.
+        article_url:
+          type: string
+        published_at:
+          type: string
+          format: date-time
+        score:
+          $ref: '#/components/schemas/SentimentScore'
+          description: >
+            Mean of this source's ticker and concept scores — the per-source
+            counterpart of the event score the dashboard ranks on. Null when the
+            extraction produced no scores: render "no data", never 0.00.
+        ai_confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+
+    TickerDirectory:
+      type: object
+      required: [tickers]
+      properties:
         tickers:
           type: array
           items:
+            $ref: '#/components/schemas/TickerDirectoryEntry'
+
+    TickerDirectoryEntry:
+      type: object
+      required: [ticker, company_name, aliases]
+      properties:
+        ticker:
+          $ref: '#/components/schemas/Ticker'
+        company_name:
+          type: string
+          example: Hoa Phat Group
+        aliases:
+          type: array
+          description: >
+            Every name this company is known by, Vietnamese included. The search
+            box matches these as well as the symbol, so "Hoa Phat" finds HPG.
+          items:
             type: string
+
+    TickerFeedItem:
+      type: object
+      required:
+        [rank, ticker, company_name, event_count, sentiment_score, is_empty]
+      properties:
+        rank:
+          type: integer
+          description: Global 1-based rank, already offset by page.
+        ticker:
+          $ref: '#/components/schemas/Ticker'
+        company_name:
+          type: string
+          description: >
+            Display name from core/data/ticker_metadata.json. Served with the
+            row so a ranked list renders in one request; GET /tickers is the
+            full directory for the search box.
+          example: Hoa Phat Group
+        event_count:
+          type: integer
+        sentiment_score:
+          type: number
+          format: float
+          minimum: -1.0
+          maximum: 1.0
+        is_empty:
+          type: boolean
+
+    EventFeedItem:
+      type: object
+      required:
+        [rank, cluster_id, event_title, total_articles, sources, tickers_mentioned]
+      properties:
+        rank:
+          type: integer
+          description: Global 1-based rank, already offset by page.
+        cluster_id:
+          type: string
+        event_title:
+          type: string
+        total_articles:
+          type: integer
+        sources:
+          type: object
+          additionalProperties:
+            type: integer
+          description: >
+            Article count keyed by source name, derived from
+            event_coverage.all_urls. Currently CafeF and VnExpress (see
+            backend/core/config.py::PipelineSettings.RSS_FEEDS) — a newly
+            registered scraper source appears here with no contract change.
+          example:
+            CafeF: 3
+            VnExpress: 1
+        tickers_mentioned:
+          type: array
+          items:
+            $ref: '#/components/schemas/Ticker'
+          description: Filtered against the Ticker enum; unknown symbols are dropped.
 
     # ── Ticker Detail ──
 
-    TickerDetail:
+    TickerSentiment:
       type: object
+      required: [ticker, window, score, is_empty]
       properties:
         ticker:
+          $ref: '#/components/schemas/Ticker'
+        window:
           type: string
+        score:
+          $ref: '#/components/schemas/SentimentScore'
+          description: >
+            S_final. null when is_empty is true — 0.0 is a legitimate neutral
+            score and must not double as "no data".
+        is_empty:
+          type: boolean
+          description: true if no valid events in window — UI shows neutral grey gauge.
+
+    TickerDetail:
+      type: object
+      required:
+        [ticker, company_name, window, sentiment_score, gauge, article_count,
+         event_count, last_updated, is_empty_state]
+      properties:
+        ticker:
+          $ref: '#/components/schemas/Ticker'
         company_name:
           type: string
+          description: >
+            display_name from backend/core/ticker_metadata.py — resolves the
+            TODO that used to sit here (see TickerFeedItem.company_name, still
+            open for the dashboard feed).
         window:
           type: string
         sentiment_score:
@@ -501,19 +989,36 @@ components:
               type: integer
             negative_count:
               type: integer
+        article_count:
+          type: integer
+          description: Total event_coverage.total_articles across events mentioning this ticker in the window
+        event_count:
+          type: integer
+          description: Count of events mentioning this ticker in the window
+        last_updated:
+          type: string
+          format: date-time
+          nullable: true
+          description: Most recent updated_at among events mentioning this ticker — null if none
         is_empty_state:
           type: boolean
-          description: true if no valid events in window — UI shows neutral grey gauge
+          description: true if no valid events in window — UI shows neutral grey gauge.
 
     TickerHistory:
       type: object
       properties:
         ticker:
-          type: string
+          $ref: '#/components/schemas/Ticker'
         days:
           type: integer
+          description: The requested range (7/30/90) — NOT the number of rows actually returned. See data.
         data:
           type: array
+          description: >
+            Oldest -> newest, one row per calendar day that exists in
+            daily_sentiment_history. Can be shorter than `days` if the EOD
+            batch hasn't run that many times yet — not an error. Nulls in
+            either field pass through untouched: no interpolation, no gap-filling.
           items:
             type: object
             properties:
@@ -521,7 +1026,7 @@ components:
                 type: string
                 format: date
                 example: "2026-06-27"
-              sentiment_score:
+              daily_sentiment_score:
                 $ref: '#/components/schemas/SentimentScore'
               closing_price:
                 type: number
@@ -531,9 +1036,10 @@ components:
       type: object
       properties:
         ticker:
-          type: string
+          $ref: '#/components/schemas/Ticker'
         window:
           type: string
+          enum: [24h, 48h, 72h]
         page:
           type: integer
         has_more:
@@ -552,15 +1058,37 @@ components:
                 format: date-time
               article_count:
                 type: integer
-              sources:
-                type: object
-                properties:
-                  CafeF:
-                    type: integer
-                  Vietstock:
-                    type: integer
+                description: event_coverage.total_articles — articles ingested, higher than len(source_breakdown) by design
               sentiment_score:
                 $ref: '#/components/schemas/SentimentScore'
+                description: This ticker's entry from aggregated_analysis.ticker_sentiments — null if no source cleared AI_CONFIDENCE_THRESHOLD
+              source_breakdown:
+                type: array
+                description: >
+                  One row per source (not per article — each source contributes
+                  exactly one representative ai_response). Sources below
+                  AI_CONFIDENCE_THRESHOLD are excluded entirely, not shown with a
+                  null/greyed score.
+                items:
+                  type: object
+                  properties:
+                    source:
+                      type: string
+                      example: CafeF
+                    score:
+                      type: number
+                      format: float
+                      minimum: -1.0
+                      maximum: 1.0
+                      description: This source's own score for this ticker, from source_breakdown[].ai_response.ticker_sentiments[]
+                    article_title:
+                      type: string
+                      description: >
+                        representative_article.title. Nullable in storage — clusters
+                        written before the field existed have none — so the API falls
+                        back to the cluster's event_title rather than an empty string.
+                    article_url:
+                      type: string
 
     # ── Audit ──
 
@@ -587,73 +1115,24 @@ components:
           description: Only include tickers being corrected — not the full list
           items:
             type: object
+            required: [ticker, score]
             properties:
               ticker:
-                type: string
+                $ref: '#/components/schemas/Ticker'
               score:
-                $ref: '#/components/schemas/SentimentScore'
+                $ref: '#/components/schemas/CorrectedScore'
         corrected_concept_sentiments:
           type: array
           nullable: true
           description: Only include concepts being corrected — not the full list
           items:
             type: object
+            required: [concept, score]
             properties:
               concept:
-                type: string
+                $ref: '#/components/schemas/Concept'
               score:
-                $ref: '#/components/schemas/SentimentScore'
-
-    AuditQueue:
-      type: object
-      properties:
-        page:
-          type: integer
-        has_more:
-          type: boolean
-        total_pending:
-          type: integer
-        items:
-          type: array
-          items:
-            type: object
-            properties:
-              cluster_id:
-                type: string
-              event_title:
-                type: string
-              created_at:
-                type: string
-                format: date-time
-              source_breakdown:
-                type: array
-                items:
-                  type: object
-                  properties:
-                    source:
-                      type: string
-                    is_audited:
-                      type: boolean
-                    ai_confidence:
-                      type: number
-                    ticker_sentiments:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          ticker:
-                            type: string
-                          score:
-                            $ref: '#/components/schemas/SentimentScore'
-                    concept_sentiments:
-                      type: array
-                      items:
-                        type: object
-                        properties:
-                          concept:
-                            type: string
-                          score:
-                            $ref: '#/components/schemas/SentimentScore'
+                $ref: '#/components/schemas/CorrectedScore'
 
     AuditLog:
       type: object
@@ -686,7 +1165,7 @@ components:
                   type: object
                   properties:
                     ticker:
-                      type: string
+                      $ref: '#/components/schemas/Ticker'
                     score:
                       $ref: '#/components/schemas/SentimentScore'
               new_ticker_sentiments:
@@ -696,7 +1175,7 @@ components:
                   type: object
                   properties:
                     ticker:
-                      type: string
+                      $ref: '#/components/schemas/Ticker'
                     score:
                       $ref: '#/components/schemas/SentimentScore'
               old_concept_sentiments:
@@ -705,7 +1184,7 @@ components:
                   type: object
                   properties:
                     concept:
-                      type: string
+                      $ref: '#/components/schemas/Concept'
                     score:
                       $ref: '#/components/schemas/SentimentScore'
               new_concept_sentiments:
@@ -715,9 +1194,156 @@ components:
                   type: object
                   properties:
                     concept:
-                      type: string
+                      $ref: '#/components/schemas/Concept'
                     score:
                       $ref: '#/components/schemas/SentimentScore'
               performed_at:
                 type: string
                 format: date-time
+
+    AuditSummary:
+      type: object
+      properties:
+        total_articles:
+          type: integer
+          description: Every document in the `articles` collection.
+        audited_articles:
+          type: integer
+          description: Source entries whose is_audited is true.
+        pending_review:
+          type: integer
+          description: >
+            total_articles - audited_articles. Includes articles that were never
+            centroid-selected and so have no ai_response to audit; this counter
+            therefore does not reach zero in normal operation.
+
+    AuditArticleRow:
+      type: object
+      description: One source entry within one cluster — the unit an admin audits.
+      properties:
+        cluster_id:
+          type: string
+        source:
+          type: string
+          example: CafeF
+        article_title:
+          type: string
+          nullable: true
+          description: >
+            Title of this source's representative article. Null for rows ingested
+            before titles were persisted; clients should fall back to event_title.
+        event_title:
+          type: string
+        article_url:
+          type: string
+        published_at:
+          type: string
+          format: date-time
+        ticker_count:
+          type: integer
+        ai_confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+        is_audited:
+          type: boolean
+        content_fed_to_ai:
+          type: string
+          nullable: true
+          description: Null until the scraper stage has fetched this article's body.
+        model_version:
+          type: string
+        prompt_version:
+          type: string
+        ticker_sentiments:
+          type: array
+          description: >
+            Current values — the admin's where this row has been corrected,
+            otherwise the AI's. These pre-fill the editable boxes.
+          items:
+            type: object
+            properties:
+              ticker:
+                $ref: '#/components/schemas/Ticker'
+              score:
+                $ref: '#/components/schemas/SentimentScore'
+        concept_sentiments:
+          type: array
+          items:
+            type: object
+            properties:
+              concept:
+                $ref: '#/components/schemas/Concept'
+              score:
+                $ref: '#/components/schemas/SentimentScore'
+        original_ticker_sentiments:
+          type: array
+          description: >
+            Always the AI's own output, never overwritten — the unchangeable
+            reference rendered beside each editable box. Stays correct across
+            repeated corrections: a correction is stored in
+            source_breakdown[].audited_response and ai_response is immutable.
+          items:
+            type: object
+            properties:
+              ticker:
+                $ref: '#/components/schemas/Ticker'
+              score:
+                $ref: '#/components/schemas/SentimentScore'
+        original_concept_sentiments:
+          type: array
+          items:
+            type: object
+            properties:
+              concept:
+                $ref: '#/components/schemas/Concept'
+              score:
+                $ref: '#/components/schemas/SentimentScore'
+        last_audit:
+          type: object
+          nullable: true
+          description: Most recent audit_log entry for this (cluster_id, source). Null if never audited.
+          properties:
+            admin_name:
+              type: string
+            action_type:
+              type: string
+            error_type:
+              type: string
+              nullable: true
+            performed_at:
+              type: string
+              format: date-time
+
+    AuditArticles:
+      type: object
+      properties:
+        page:
+          type: integer
+        has_more:
+          type: boolean
+        total:
+          type: integer
+          description: Rows matching the current status/search filter, across all pages.
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditArticleRow'
+
+    AuditActionResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        cluster_id:
+          type: string
+        source:
+          type: string
+        action_type:
+          type: string
+        aggregated_analysis_recomputed:
+          type: boolean
+          description: >
+            True when the action changed scores and the cluster's
+            aggregated_analysis was rebuilt. False for a plain approve.

@@ -1,0 +1,72 @@
+name: Schedule EOD Batch
+
+on:
+  schedule:
+    # 00:30 ICT = 17:30 UTC ngay hom truoc (ICT = UTC+7).
+    # KHONG dat 23:59 ICT (16:59 UTC) — GitHub Actions cron thuong bi
+    # delay vai phut, neu job du dinh chay dung nua dem ma bi tre qua
+    # ranh gioi ngay, se tinh sai ngay va am tham bo sot 1 ngay.
+    - cron: "30 17 * * *"
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "Ngay can chay lai (YYYY-MM-DD, ICT). Bo trong de tu tinh 'hom qua'."
+        required: false
+        type: string
+
+# Khoa theo ngay: backfill ngay 10 va cron dem ngay 24 khong chan nhau, nhung hai
+# lan chay cung mot ngay thi phai xep hang. cancel-in-progress: false — giet mot run
+# dang bulk_write con te hon la bat no doi.
+concurrency:
+  group: eod-batch-${{ inputs.target_date || 'nightly' }}
+  cancel-in-progress: false
+
+jobs:
+  eod-batch:
+    runs-on: ubuntu-latest
+    # Job nay khong goi GitHub API; GITHUB_TOKEN chi can quyen doc. `uv sync` chay
+    # build hook cua package tu PyPI, nen cu coi nhu co code la chay tren runner.
+    permissions:
+      contents: read
+    # Mac dinh cua GitHub la 360 phut. Job nay chay duoi 1 phut; 30 lan goi gia
+    # tuan tu voi timeout 10s la ~5 phut neu VNDirect chet.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Build system moi: PEP 621 + hatchling, pyproject.toml o goc repo.
+      # Khong con Poetry — "packages = ['backend']" trong pyproject.toml
+      # da tu lam "backend" import duoc, khong can PYTHONPATH/--app-dir
+      # hack nhu bo cu.
+      #
+      # --frozen: cai dat dung theo uv.lock, khong resolve lai — mot ban release
+      # moi cua dependency khong the lam hong job dem ma repo khong doi gi.
+      # --no-dev: ruff/pytest/mongomock khong can cho cron production.
+      - name: Install dependencies
+        run: uv sync --frozen --no-dev
+
+      - name: Run EOD batch
+        env:
+          MONGODB_URI: ${{ secrets.MONGODB_URI }}
+          # Khong de mac dinh: doc file nay phai biet ngay no ghi vao DB nao.
+          MONGODB_DB_NAME: FinSense
+          # Qua env, KHONG noi thang vao script: "${{ inputs.target_date }}" duoc
+          # GitHub thay truc tiep vao source cua shell script, nen mot input dang
+          # $(...) se duoc bash chay that.
+          TARGET_DATE: ${{ inputs.target_date }}
+        run: |
+          # --no-sync: buoc tren da sync roi; khong co no thi `uv run` tu sync lai
+          # va keo nguoc dev group (ruff/pytest/mongomock) vao.
+          if [ -n "$TARGET_DATE" ]; then
+            uv run --no-sync python -m backend.pipeline.eod_batch.eod_batch "$TARGET_DATE"
+          else
+            uv run --no-sync python -m backend.pipeline.eod_batch.eod_batch
+          fi
