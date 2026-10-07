@@ -278,7 +278,7 @@ export function EventList({
     <div className="flex flex-col gap-4">
       {events.map((event, index) => (
         <EventRow
-          key={event.cluster_id}
+          key={`${event.cluster_id}-${index}`} 
           event={event}
           isFirstRow={index === 0 && page === 1}
         />
