@@ -8,25 +8,32 @@ interface TopBarProps {
   isAdmin?: boolean;
   adminEmail?: string;
   onSignOut?: () => void;
-  lastUpdated?: string; // e.g. "10:30 AM"
+  lastUpdated?: string; // e.g. "10:30 AM"; omit to hide the status
+  navLink?: { href: string; label: string };
 }
 
-export function TopBar({ isAdmin, adminEmail, onSignOut, lastUpdated }: TopBarProps) {
+export function TopBar({ isAdmin, adminEmail, onSignOut, lastUpdated, navLink }: TopBarProps) {
   return (
     <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
       <div className="max-w-335 mx-auto px-6 h-16 flex items-center justify-between gap-8">
-        
-        <div className="shrink-0">
+
+        <div className="shrink-0 flex items-center gap-6">
           <Link href="/" className="hover:opacity-80 transition-opacity block">
-            <Image 
+            <Image
               src="https://d2uq10394z5icp.cloudfront.net/global/FTC-DefaultLogo-NoName.svg"
-              alt="FIN-SENSE Logo" 
+              alt="FIN-SENSE Logo"
               width={160}
-              height={40} 
-              priority 
-              className="w-auto h-8" 
+              height={40}
+              priority
+              className="w-auto h-8"
             />
           </Link>
+          {lastUpdated && (
+            <div className="hidden md:block text-sm">
+              <div className="text-gray-800 font-medium">Updated {lastUpdated}</div>
+              <div className="text-xs text-gray-500">Auto-refreshes every 1 hour</div>
+            </div>
+          )}
         </div>
 
         <div className="flex-1 flex justify-center">
@@ -34,13 +41,21 @@ export function TopBar({ isAdmin, adminEmail, onSignOut, lastUpdated }: TopBarPr
         </div>
 
         <div className="shrink-0 flex items-center gap-4 text-sm">
-          {isAdmin ? (
+          {navLink && (
+            <Link
+              href={navLink.href}
+              className="font-medium text-gray-600 hover:text-navy-900 transition-colors"
+            >
+              {navLink.label}
+            </Link>
+          )}
+          {isAdmin && (
             <>
               <div className="flex items-center gap-2 px-3 py-1.5 bg-brand-yellow/10 text-brand-dark rounded-full font-medium text-xs border border-brand-yellow/30">
                 <ShieldCheck className="w-4 h-4" /> ADMIN
               </div>
               <span className="text-gray-800 font-medium hidden md:block">{adminEmail || 'admin@domain.com'}</span>
-              <button 
+              <button
                 onClick={onSignOut}
                 className="flex items-center gap-2 text-gray-600 hover:text-navy-900 transition-colors"
               >
@@ -48,14 +63,9 @@ export function TopBar({ isAdmin, adminEmail, onSignOut, lastUpdated }: TopBarPr
                 <span className="hidden md:block">Sign out</span>
               </button>
             </>
-          ) : (
-            <div className="text-right hidden md:block">
-              <div className="text-gray-800 font-medium">Updated {lastUpdated || '--:--'}</div>
-              <div className="text-xs text-gray-500">Auto-refreshes every 30 min</div>
-            </div>
           )}
         </div>
-        
+
       </div>
     </header>
   );

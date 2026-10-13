@@ -5,7 +5,7 @@
 
 ## Context
 
-The admin audit panel (`frontend/admin-panel`) is the only authenticated surface in FinSense.
+The admin audit panel (the `/admin` routes of `frontend/web`) is the only authenticated surface in FinSense.
 Everything else — the public dashboard and the ticker detail page — is anonymous. The audit
 endpoints need to know *which* admin performed an action, because `audit_log` is immutable
 (US-G4) and stores `admin_id` / `admin_name` on every entry.

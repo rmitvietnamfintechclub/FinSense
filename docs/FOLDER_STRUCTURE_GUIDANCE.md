@@ -210,31 +210,31 @@ require a secret.
 
 ## Frontend
 
-Two separate Next.js apps. They share components from `frontend/ui/` and types
-from `frontend/types/`.
+One Next.js app, `frontend/web/`. Public pages need no auth; everything under `/admin` is the
+audit panel and requires login. It uses components from `frontend/ui/` and types from
+`frontend/types/`.
 
 ```
 frontend/
-  public-dashboard/            Public-facing sentiment dashboard (no auth)
-    src/app/                   Next.js pages
-    src/features/              Feature folders mirroring the API domains
+  web/
+    app/                       Next.js pages
+      page.tsx                 / — dashboard
+      ticker/[symbol]/         /ticker/HPG — ticker detail
+      admin/                   /admin/* — layout.tsx redirects signed-out visitors to login
+        login/                 /admin/login
+        audit/                 /admin/audit — audit queue
+    features/                  Feature folders mirroring the API domains
       dashboard/               Market gauge, ticker list, event list
-      ticker/                  Ticker detail page, dual-axis chart
-      search/                  Ticker search
-    src/lib/                   API client, formatters, query keys
-  admin-panel/                 Authenticated admin audit panel
-    src/app/                   Next.js pages (login, audit)
-    src/features/
+      ticker/                  Dual-axis chart, recent events
       audit/                   Audit table, correction form
-      auth/                    Login form, auth hook
-    src/lib/                   API client, query keys
-  ui/                          Shared React components used by both apps
+      auth/                    useAuth (login state), HeaderBar
+    lib/                       Formatters
+  ui/                          Shared React components
     src/
-      SentimentGauge.tsx       Gauge component
-      SentimentBadge.tsx       Score badge
-      Sidebar.tsx              Navigation sidebar
-      Breadcrumb.tsx           Breadcrumb navigation
-      Disclaimer.tsx           Sentiment disclaimer footer
+      TopBar.tsx               Header (nav link; admin mode adds badge, email, sign out)
+      SearchBox.tsx            Ticker search
+      PageShell.tsx            Page width container
+      api-client.ts            The single API client; attaches the admin token
   types/                       TypeScript types generated from OpenAPI spec
     generated/api.types.ts     Auto-generated — do not edit manually
     enums.ts                   Frontend enums
@@ -361,7 +361,7 @@ outside branch pointers and breaks the history. Push from git.
 | Change scoring formula | `backend/core/formulas.py` — coordinate with both teams |
 | Add a shared Python enum | `backend/core/enums.py` |
 | Add a shared React component | `frontend/ui/src/` |
-| Add a frontend page | `frontend/public-dashboard/src/app/` or `frontend/admin-panel/src/app/` |
+| Add a frontend page | `frontend/web/app/` (admin pages under `frontend/web/app/admin/`) |
 | Update lexicon data | `backend/pipeline/lexicon/` — run `validate_lexicon.py` after |
 | Update DB schema | `docs/mongodb_schema.md` first, then `scripts/init_db.py` |
 | Record an architectural decision | `docs/adr/ADR-00N-title.md` |

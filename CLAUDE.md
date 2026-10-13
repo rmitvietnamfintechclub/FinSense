@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 FinSense ingests Vietnamese financial news (CafeF, VnExpress), clusters articles describing the
 same market event, and uses Gemini to extract sentiment toward the VN30 tickers and 10 sector
 concepts. Scores are confidence-weighted and meant to be human-audited. Monorepo: scheduled
-Python pipeline + FastAPI serving API + two Next.js frontends, all over one MongoDB Atlas database.
+Python pipeline + FastAPI serving API + one Next.js frontend, all over one MongoDB Atlas database.
 
 `docs/FOLDER_STRUCTURE_GUIDANCE.md` is the team's authoritative "where does my code go" doc — read
 it before adding files. Note it describes some things that don't match the tree yet (see
@@ -90,9 +90,11 @@ Data files: `core/data/static_ontology.json` (ticker → concept weights, via `c
 `core/data/ticker_metadata.json` (display names + aliases; loading fails loudly if any `Ticker` is
 missing an entry). Pipeline-only lexicons live in `backend/pipeline/lexicon/`.
 
-**Frontend** (`frontend/`) — two Next.js apps (`public-dashboard`, `admin-panel`) sharing
-`ui/` components and `types/generated/api.types.ts`, which is generated from `docs/openapi.yaml`
-by `frontend/types/generate.sh` and must never be hand-edited.
+**Frontend** (`frontend/`) — one Next.js app, `web/`: public pages at `/` and `/ticker/[symbol]`,
+the authenticated audit panel under `/admin/*` (guard in `app/admin/layout.tsx`, login state in
+`features/auth/useAuth.ts`). It uses `ui/` components — including the single `apiClient`, which
+attaches the admin token — and `types/generated/api.types.ts`, which is generated from
+`docs/openapi.yaml` by `frontend/types/generate.sh` and must never be hand-edited.
 
 ## Rules that bite
 

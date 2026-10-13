@@ -33,10 +33,10 @@ read on media tone — not a trading signal.
 
 ## Tech Stack
 
-**Frontend** (planned)
-- Next.js, TypeScript
-- Two apps: a public dashboard and an authenticated admin panel, sharing a component library and
-  API types generated from the OpenAPI spec
+**Frontend**
+- Next.js, TypeScript, deployed on Vercel
+- One app: the public dashboard, plus the authenticated admin audit panel under `/admin`, using a
+  shared component library and API types generated from the OpenAPI spec
 
 **Backend**
 - Python 3.13, FastAPI (serving API — 14 endpoints, at full parity with the OpenAPI spec)
@@ -54,7 +54,7 @@ read on media tone — not a trading signal.
 **DevOps / Infrastructure**
 - GitHub Actions — CI (ruff; a test job is still to be added), an hourly pipeline cron and a
   nightly EOD batch cron. Neither schedule is live until it reaches the default branch.
-- Render (planned API hosting)
+- Render (API hosting)
 - MongoDB Atlas (M0 free tier)
 
 ## Repository Structure
@@ -66,8 +66,7 @@ FinSense/
 │   ├── pipeline/       RSS → cluster → scrape → extract → aggregate, plus the nightly EOD batch
 │   └── api/            Serving API (FastAPI) — auth, audit, dashboard, ticker
 ├── frontend/
-│   ├── public-dashboard/   Public sentiment dashboard
-│   ├── admin-panel/        Authenticated audit panel
+│   ├── web/                Next.js app — public dashboard, admin audit panel under /admin
 │   ├── ui/                 Shared React components
 │   └── types/               API types generated from OpenAPI
 ├── evaluation/          Clustering-threshold calibration; extraction benchmarking (harness WIP)
@@ -78,7 +77,7 @@ FinSense/
 
 ## System Architecture
 
-FinSense is a monorepo composed of a scheduled data pipeline, a REST API, and two web frontends,
+FinSense is a monorepo composed of a scheduled data pipeline, a REST API, and a web frontend,
 all backed by a shared MongoDB database.
 
 ```mermaid
@@ -86,9 +85,8 @@ flowchart LR
     A[RSS Sources] --> B[Ingestion Pipeline]
     B --> C[(MongoDB Atlas)]
     C --> D[Serving API]
-    D --> E[Public Dashboard]
-    D --> F[Admin Panel]
-    F -->|audit corrections| C
+    D --> E[Web App: dashboard + /admin]
+    E -->|audit corrections| D
 ```
 
 The pipeline fetches news, clusters it into events, and enriches each event with AI-extracted
@@ -124,10 +122,9 @@ Each part of the stack is set up and run independently. Follow the setup instruc
 
 - [`backend/README.md`](backend/README.md) — Python environment, database setup, running the
   pipeline and API
-- [`frontend/README.md`](frontend/README.md) — Node environment, running the web apps
-
-> **TODO:** `frontend/README.md` does not exist yet — the frontend is unimplemented. Create it
-> with component-specific setup steps once that work starts.
+- Frontend — from `frontend/`: `npm ci`, then `npm run dev` serves the app on `localhost:3000`
+  (public dashboard at `/`, admin audit panel at `/admin`). It calls the API at
+  `NEXT_PUBLIC_API_URL`, defaulting to `http://localhost:8000/api`.
 
 ### Running the Pipeline Locally
 
@@ -200,8 +197,9 @@ API. See `.env.example` for the required keys, and
 are worth tuning. At minimum you need `MONGODB_URI`, `LLM_API_KEY` (pipeline) and `JWT_SECRET_KEY`
 (the API refuses to start without it).
 
-The frontend does not yet have its own environment configuration — TODO once implementation
-starts.
+The frontend needs one variable, `NEXT_PUBLIC_API_URL` (the API base, ending in `/api`). It is
+baked in at build time, so changing it on Vercel requires a redeploy. The API must also list the
+frontend's origin in `CORS_ORIGINS`.
 
 Never commit `.env` files.
 

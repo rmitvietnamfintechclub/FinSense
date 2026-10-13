@@ -26,7 +26,7 @@ find . -path ./.venv -prune -o -name '*.py' -size -1c -print   # find the empty 
 | API — audit | **Implemented.** `/audit/summary`, `/audit/articles`, `PATCH /audit/events/{cluster_id}/{source}`, `/audit/log`. Read paths verified against live Atlas data; the PATCH write path is covered by unit tests only. Corrections write `source_breakdown[].audited_response` since 2026-08-30 — `ai_response` is now immutable |
 | Docs | `README.md`, `backend/README.md`, `backend/PIPELINE.md`, `FOLDER_STRUCTURE_GUIDANCE.md`, `mongodb_schema.md`, `CLAUDE.md` swept 2026-08-30; `backend/ENDPOINTS.md` (all 16 endpoints, one table) added 2026-08-30. `PIPELINE.md` and `ENDPOINTS.md` moved out of `docs/` to `backend/` on 2026-08-30. `frontend/README.md` and `docs/ARCHITECTURE.md` still missing |
 | API — contract parity | **16 documented endpoints, 16 implemented, zero drift** against `docs/openapi.yaml` |
-| Frontend (both apps, `ui/`, `types/`) | Every file 0 bytes — cannot be installed or run |
+| Frontend (`web/`, `ui/`, `types/`) | **Implemented, one app** (2026-10-13): public dashboard at `/`, audit panel under `/admin`. The former `public-dashboard` and `admin-panel` apps were merged. Vercel's project root must point at `frontend/web` after this merges (it was `frontend/public-dashboard`); API on Render. No frontend tests |
 | Evaluation harness | Only `cluster_threshold.py` works; runner/metrics empty, no ground truth |
 
 ## Verified pipeline run
@@ -178,8 +178,6 @@ Seeded ahead of implementation, all 0 bytes:
   2026-08-29 — an empty file in `.github/workflows/` shows up as an invalid workflow in the Actions
   tab. All three remaining workflows have content. `docs/FOLDER_STRUCTURE_GUIDANCE.md` still lists
   the deleted four as intended; recreate them from there if the split CI is wanted.
-- Every `frontend/**/*.tsx`, every frontend `package.json`/`tsconfig.json`/`next.config.ts`,
-  `frontend/types/generate.sh`, `frontend/types/generated/api.types.ts`.
 - `evaluation/runner.py`, `evaluation/metrics.py`. (`evaluation/README.md` and the whole
   `evaluation/results/` directory were deleted on 2026-08-23; only `cluster_threshold.py` remains
   functional.)
@@ -205,8 +203,9 @@ as of that date. What is still knowingly out of step:
   `title`/`summary`/`full_content`. `admin_users` was added the same day.)
 - `README.md` links to `frontend/README.md` and `docs/ARCHITECTURE.md`; neither exists. Both are
   flagged as TODO at the link site.
-- `docs/FOLDER_STRUCTURE_GUIDANCE.md` still describes the frontend and evaluation trees as intended
-  shapes. Both are almost entirely 0-byte scaffolding — see the inventory above.
+- `docs/FOLDER_STRUCTURE_GUIDANCE.md` still describes the evaluation tree as an intended shape. It
+  is almost entirely 0-byte scaffolding — see the inventory above. (Its frontend section was
+  rewritten to match `frontend/web` on 2026-10-13.)
 - `docs/RUBRICS/SENTIMENT.md` and `AI_CONFIDENCE.md` are the unversioned originals. The files the
   prompt actually loads are the versioned copies under
   `backend/pipeline/stages/extract/prompts/docs/`, pinned by filename to `PROMPT_VERSION`. Editing
@@ -220,8 +219,7 @@ Ordered by what unblocks the most:
    answer is retries/backoff or a paid tier.
 2. Seed an admin (`scripts/init_db.py` then `scripts/seed_admins.py`) and exercise the audit
    `PATCH` end to end — it is the one write path never run against real Mongo.
-3. Build `frontend/admin-panel` (login + audit queue). Regenerate
-   `frontend/types/generated/api.types.ts` first — `docs/openapi.yaml` changed substantially on
+3. Regenerate `frontend/types/generated/api.types.ts` — `docs/openapi.yaml` changed substantially on
    2026-08-28 and again on 2026-08-30 (`CorrectedScore`), so the generated types are stale.
 4. Add a test job to CI — the suite is green, and only ruff gates a merge.
 5. Batch the EOD price fetch — 30 sequential requests per night where VNDirect's `q` accepts a
