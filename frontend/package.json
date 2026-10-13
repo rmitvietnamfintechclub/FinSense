@@ -1,0 +1,15 @@
+{
+  "name": "finsense-frontend",
+  "private": true,
+  "workspaces": [
+    "public-dashboard",
+    "admin-panel",
+    "ui",
+    "types"
+  ],
+  "scripts": {
+    "dev:public": "npm run dev --workspace=public-dashboard",
+    "dev:admin": "npm run dev --workspace=admin-panel",
+    "generate-types": "npm run generate --workspace=types"
+  }
+}

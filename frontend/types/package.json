@@ -1,0 +1,11 @@
+{
+  "name": "@finsense/types",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "generate": "bash generate.sh"
+  },
+  "devDependencies": {
+    "openapi-typescript": "^6.7.0"
+  }
+}
