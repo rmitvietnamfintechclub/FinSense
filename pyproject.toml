@@ -3,30 +3,37 @@ name = "finsense"
 version = "0.1.0"
 requires-python = ">=3.13"
 
+# Base = what the API needs. Render installs only this; the pipeline's ML stack
+# (torch via sentence-transformers) is several GB and the API never imports it.
 dependencies = [
     "bcrypt==5.0.0",
+    # Only the pipeline calls it, but backend/core/text_utils.py imports it.
     "beautifulsoup4==4.15.0",
     "certifi==2025.11.12",
     "fastapi==0.141.1",
+    "motor==3.7.1",
+    "pydantic==2.13.4",
+    "pydantic-settings==2.14.2",
+    "pyjwt==2.10.1",
+    "pymongo==4.17.0",
+    "uvicorn[standard]==0.52.4",
+]
+
+[project.optional-dependencies]
+pipeline = [
     "feedparser==6.0.12",
     "google-api-core>=2.19.0",
     "httpx==0.28.1",
     "langchain-core==1.5.3",
     "langchain-google-genai==4.3.2",
-    "motor==3.7.1",
     "numpy==2.5.1",
     "protobuf==7.35.1",
-    "pydantic==2.13.4",
-    "pydantic-settings==2.14.2",
-    "pyjwt==2.10.1",
-    "pymongo==4.17.0",
     "requests==2.34.2",
     "sentence-transformers==5.6.0",
-    "uvicorn[standard]==0.52.4",
 ]
-
-[project.optional-dependencies]
+# Pulls in pipeline so `uv sync --extra dev` still runs the whole test suite.
 dev = [
+    "finsense[pipeline]",
     "ruff>=0.8.0",
     "pytest>=8.0.0",
     "mongomock>=4.3.0",

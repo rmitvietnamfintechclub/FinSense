@@ -53,7 +53,7 @@ jobs:
       # cua dependency khong the lam hong run tu dong ma repo khong doi gi.
       # --no-dev: ruff/pytest/mongomock khong can cho production.
       - name: Install dependencies
-        run: uv sync --frozen --no-dev
+        run: uv sync --frozen --no-dev --extra pipeline
 
       # --no-sync: buoc tren sync roi; khong co no thi `uv run` tu sync lai va keo
       # nguoc dev group vao.

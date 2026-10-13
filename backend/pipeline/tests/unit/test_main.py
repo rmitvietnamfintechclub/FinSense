@@ -26,7 +26,9 @@ from backend.core.schemas.event_cluster import (
 from backend.core.schemas.sentiment import AIResponse
 from backend.pipeline import main as pipeline_main
 
-NOW = datetime(2026, 8, 29, 6, 0, tzinfo=UTC)
+# Relative, not fixed: load_unfinished_clusters cuts off at the real clock, so a
+# pinned date ages out of CLUSTER_LOOKBACK_DAYS and every query test goes empty.
+NOW = datetime.now(UTC)
 
 
 def make_cluster(cluster_id: str, *, extracted: bool) -> EventCluster:

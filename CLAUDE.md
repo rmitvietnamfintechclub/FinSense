@@ -16,7 +16,7 @@ it before adding files. Note it describes some things that don't match the tree 
 ## Commands
 
 ```shell
-uv sync --extra dev                                  # install (Python >=3.13); dev extra = ruff, pytest, mongomock
+uv sync --extra dev                                  # install (Python >=3.13); dev extra = pipeline extra + ruff, pytest, mongomock. API-only deploy: uv sync --no-dev
 
 uv run python -m backend.pipeline.main               # run the full pipeline once (needs MONGODB_URI, LLM_API_KEY)
 uv run python -m backend.pipeline.eod_batch.eod_batch [YYYY-MM-DD]  # EOD batch; date arg re-runs a past day
