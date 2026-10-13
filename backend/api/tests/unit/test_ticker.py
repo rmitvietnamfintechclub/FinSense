@@ -47,6 +47,8 @@ from backend.core.enums import Ticker
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
 OPENAPI_PATH = REPO_ROOT / "docs" / "openapi.yaml"
+# /history filters to the last N days by the real clock; a pinned date ages out.
+RECENT_DATE = (datetime.now(UTC) - timedelta(days=1)).date().isoformat()
 
 
 # The service windows history on ICT dates; a UTC "today" would disagree with it
@@ -789,7 +791,7 @@ class TestMalformedDocumentsDoNotCrash:
         assert result.items[0].source_breakdown == []  # excluded, not crashed
 
     def test_history_survives_row_missing_closing_price_key_entirely(self):
-        row = {"ticker": "HPG", "date": "2026-08-01", "daily_sentiment_score": 0.2}  # no closing_price key at all
+        row = {"ticker": "HPG", "date": RECENT_DATE, "daily_sentiment_score": 0.2}  # no closing_price key at all
         fake_db = {"daily_sentiment_history": FakeCollection([row])}
         result = run(svc.get_ticker_history(fake_db, symbol="HPG", days=30))
         assert result.data[0].closing_price is None
@@ -848,7 +850,7 @@ class TestFailsClosedOnBackendTrouble:
         behavior) — raise_server_exceptions=False here reproduces what an
         actual uvicorn server sends over the wire, which was confirmed
         manually to be a clean 500."""
-        corrupted_row = {"ticker": "HPG", "date": "2026-08-01", "daily_sentiment_score": 5.0, "closing_price": None}
+        corrupted_row = {"ticker": "HPG", "date": RECENT_DATE, "daily_sentiment_score": 5.0, "closing_price": None}
         app = FastAPI()
         app.include_router(router)
         app.dependency_overrides[db_dep] = lambda: {"daily_sentiment_history": FakeCollection([corrupted_row])}

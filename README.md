@@ -145,7 +145,7 @@ without the API or frontend:
 2. Install dependencies into the active environment:
 
    ```bash
-   uv sync --active
+   uv sync --active --extra pipeline
    ```
 
 3. Populate `.env` at the project root (see `.env.example`) — at minimum `MONGODB_URI` and
